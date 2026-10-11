@@ -1,0 +1,24 @@
+{
+  "name": "frontend",
+  "type": "module",
+  "version": "0.0.1",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n \"backend,frontend\" -c \"cyan.bold,green.bold\" \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:frontend": "astro dev --ignore-lock",
+    "dev:backend": "uv run --directory ../backend uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "@types/leaflet": "^1.9.22",
+    "astro": "^7.3.8",
+    "leaflet": "^1.9.4"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.6"
+  }
+}

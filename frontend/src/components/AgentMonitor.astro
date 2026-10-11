@@ -1,0 +1,298 @@
+---
+---
+
+<div class="agent-monitor glass-panel">
+  <div class="monitor-header">
+    <div class="monitor-title-box">
+      <span class="pulse-indicator" id="agents-pulse"></span>
+      <h2 class="monitor-title">Pipeline Multiagente JEV</h2>
+    </div>
+    <span class="badge badge-jev" id="total-time-badge">3 Agentes Activos</span>
+  </div>
+
+  <div class="pipeline-cards">
+    <!-- Agente 1: Extractor Geoespacial -->
+    <div class="agent-card" id="card-agent-1">
+      <div class="agent-card-header">
+        <div class="agent-num">01</div>
+        <div class="agent-info">
+          <h3 class="agent-name">GeoExtractorAgent</h3>
+          <span class="agent-sub">Microsoft Planetary STAC</span>
+        </div>
+        <span class="status-pill status-ready" id="status-agent-1">Listo</span>
+      </div>
+      <div class="agent-body">
+        <div class="metric-row">
+          <span class="m-label">Cota Altimétrica:</span>
+          <span class="m-val" id="val-cota">-- m</span>
+        </div>
+        <div class="metric-row">
+          <span class="m-label">Pendiente estimada:</span>
+          <span class="m-val" id="val-slope">--°</span>
+        </div>
+        <div class="metric-row">
+          <span class="m-label">Recurrencia JRC (35a):</span>
+          <span class="m-val" id="val-jrc-pct">--%</span>
+        </div>
+        <div class="metric-row">
+          <span class="m-label">Radar Sentinel-1 SAR:</span>
+          <span class="m-val" id="val-sar">-- dB</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Agente 2: Riesgo Hidrológico JEV -->
+    <div class="agent-card" id="card-agent-2">
+      <div class="agent-card-header">
+        <div class="agent-num agent-num-jev">02</div>
+        <div class="agent-info">
+          <h3 class="agent-name">HydroRiskAgent</h3>
+          <span class="agent-sub">JEV System One (Noul + Score + Choice)</span>
+        </div>
+        <span class="status-pill status-ready" id="status-agent-2">Listo</span>
+      </div>
+      <div class="agent-body">
+        <div class="metric-row">
+          <span class="m-label">Noul Riesgo Crítico:</span>
+          <span class="m-val highlight-val" id="val-noul-prob">--</span>
+        </div>
+        <!-- Barra de Probabilidad Noul -->
+        <div class="probability-bar-bg">
+          <div class="probability-bar-fill" id="noul-fill" style="width: 0%;"></div>
+        </div>
+        <div class="metric-row">
+          <span class="m-label">Score Topografía:</span>
+          <span class="m-val" id="val-topo-score">--</span>
+        </div>
+        <div class="metric-row">
+          <span class="m-label">Mecanismo Dominante:</span>
+          <span class="m-val" id="val-mecanismo">--</span>
+        </div>
+        <div class="metric-row">
+          <span class="m-label">Confianza Jev:</span>
+          <span class="m-val" id="val-hydro-conf">--%</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Agente 3: Dictamen Agronómico JEV -->
+    <div class="agent-card" id="card-agent-3">
+      <div class="agent-card-header">
+        <div class="agent-num agent-num-agri">03</div>
+        <div class="agent-info">
+          <h3 class="agent-name">AgroVerdictAgent</h3>
+          <span class="agent-sub">JEV System One (Choice + Score + Noul)</span>
+        </div>
+        <span class="status-pill status-ready" id="status-agent-3">Listo</span>
+      </div>
+      <div class="agent-body">
+        <div class="metric-row">
+          <span class="m-label">Aptitud Principal:</span>
+          <span class="m-val highlight-agri" id="val-aptitud-tag">--</span>
+        </div>
+        <div class="metric-row">
+          <span class="m-label">Resiliencia Climática:</span>
+          <span class="m-val" id="val-resiliencia">--</span>
+        </div>
+        <div class="metric-row">
+          <span class="m-label">Obras de Drenaje:</span>
+          <span class="m-val" id="val-obras">--</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .agent-monitor {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 16px 20px;
+    background: rgba(13, 19, 35, 0.82);
+  }
+
+  .monitor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .monitor-title-box {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .pulse-indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: var(--color-jev);
+    box-shadow: 0 0 10px var(--color-jev);
+    animation: pulse-subtle 2s infinite ease-in-out;
+  }
+
+  .monitor-title {
+    font-family: var(--font-heading);
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: #ffffff;
+  }
+
+  .pipeline-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 12px;
+  }
+
+  .agent-card {
+    background: rgba(10, 15, 29, 0.75);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: all 0.3s ease;
+  }
+
+  .agent-card:hover {
+    border-color: rgba(255, 255, 255, 0.16);
+    background: rgba(15, 23, 42, 0.85);
+  }
+
+  .agent-card.running {
+    border-color: var(--color-jev);
+    box-shadow: 0 0 16px rgba(139, 92, 246, 0.25);
+  }
+
+  .agent-card.completed {
+    border-color: rgba(16, 185, 129, 0.35);
+  }
+
+  .agent-card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .agent-num {
+    font-family: var(--font-heading);
+    font-size: 0.85rem;
+    font-weight: 800;
+    color: var(--color-hydro-light);
+    background: rgba(6, 182, 212, 0.15);
+    border: 1px solid rgba(6, 182, 212, 0.3);
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .agent-num-jev {
+    color: var(--color-jev-light);
+    background: rgba(139, 92, 246, 0.15);
+    border-color: rgba(139, 92, 246, 0.35);
+  }
+
+  .agent-num-agri {
+    color: var(--color-agri-light);
+    background: rgba(16, 185, 129, 0.15);
+    border-color: rgba(16, 185, 129, 0.35);
+  }
+
+  .agent-info {
+    flex: 1;
+  }
+
+  .agent-name {
+    font-family: var(--font-heading);
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #ffffff;
+    line-height: 1.1;
+  }
+
+  .agent-sub {
+    font-size: 0.68rem;
+    color: var(--text-dim);
+  }
+
+  .status-pill {
+    font-size: 0.68rem;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 999px;
+  }
+
+  .status-ready {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-muted);
+  }
+
+  .status-running {
+    background: rgba(139, 92, 246, 0.2);
+    color: var(--color-jev-light);
+    border: 1px solid rgba(139, 92, 246, 0.4);
+    animation: pulse-subtle 1.2s infinite ease-in-out;
+  }
+
+  .status-done {
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--color-agri-light);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+  }
+
+  .agent-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    padding-top: 8px;
+  }
+
+  .metric-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.74rem;
+  }
+
+  .m-label {
+    color: var(--text-muted);
+  }
+
+  .m-val {
+    font-family: var(--font-mono);
+    color: var(--text-main);
+    font-weight: 500;
+  }
+
+  .highlight-val {
+    color: #fb7185;
+    font-weight: 700;
+  }
+
+  .highlight-agri {
+    color: var(--color-agri-light);
+    font-weight: 700;
+  }
+
+  .probability-bar-bg {
+    width: 100%;
+    height: 5px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 3px;
+    overflow: hidden;
+    margin: 2px 0 4px 0;
+  }
+
+  .probability-bar-fill {
+    height: 100%;
+    background: linear-gradient(to right, #10b981, #f59e0b, #ef4444);
+    transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+</style>

@@ -1,0 +1,126 @@
+---
+---
+
+<header class="main-header glass-panel">
+  <div class="header-left">
+    <div class="logo-box">
+      <div class="logo-icon">🌾</div>
+      <div>
+        <h1 class="logo-title">AgroJEV <span class="highlight">PBA</span></h1>
+        <p class="logo-subtitle">Auditoría Hídrica y Terreno Cultivable · Prov. Buenos Aires</p>
+      </div>
+    </div>
+
+    <div class="header-badges">
+      <span class="badge badge-jev">JEV System One</span>
+      <span class="badge badge-hydro">Planetary STAC</span>
+      <span class="badge badge-agri">Copernicus 30m</span>
+    </div>
+  </div>
+
+  <div class="header-right">
+    <div class="status-indicator" id="system-status">
+      <span class="status-dot"></span>
+      <span class="status-text">Backend Listo</span>
+    </div>
+  </div>
+</header>
+
+<style>
+  .main-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 24px;
+    margin: 16px 20px 0 20px;
+    border-radius: 16px;
+    background: rgba(10, 15, 29, 0.82);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    flex-wrap: wrap;
+  }
+
+  .logo-box {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .logo-icon {
+    font-size: 1.8rem;
+    background: rgba(16, 185, 129, 0.15);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    border-radius: 12px;
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .logo-title {
+    font-family: var(--font-heading);
+    font-size: 1.35rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: #ffffff;
+    line-height: 1.1;
+  }
+
+  .logo-title .highlight {
+    background: linear-gradient(135deg, var(--color-agri-light), var(--color-hydro-light));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .logo-subtitle {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+
+  .header-badges {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.25);
+    border-radius: 9999px;
+    font-size: 0.8rem;
+    color: var(--color-agri-light);
+    font-weight: 500;
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    background-color: var(--color-agri);
+    border-radius: 50%;
+    box-shadow: 0 0 8px var(--color-agri);
+    animation: pulse-subtle 2s infinite ease-in-out;
+  }
+
+  @media (max-width: 900px) {
+    .main-header {
+      flex-direction: column;
+      gap: 12px;
+      align-items: flex-start;
+      margin: 10px;
+    }
+    .header-badges {
+      display: none;
+    }
+  }
+</style>

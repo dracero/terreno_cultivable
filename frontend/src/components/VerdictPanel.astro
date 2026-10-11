@@ -1,0 +1,215 @@
+---
+---
+
+<div class="verdict-panel glass-panel" id="verdict-container">
+  <div class="verdict-header">
+    <div class="header-badge-wrap">
+      <span class="badge badge-agri" id="badge-semaforo">Auditoría Pendiente</span>
+      <span class="badge badge-jev" id="badge-confianza">JEV Calibrado</span>
+    </div>
+    <button class="btn btn-secondary btn-sm" id="btn-copy-report">
+      📋 Copiar Informe
+    </button>
+  </div>
+
+  <div class="score-hero">
+    <div class="score-circle-container">
+      <svg class="score-svg" viewBox="0 0 100 100">
+        <circle class="score-bg-circle" cx="50" cy="50" r="42"></circle>
+        <circle class="score-fill-circle" id="score-meter" cx="50" cy="50" r="42"></circle>
+      </svg>
+      <div class="score-text-box">
+        <span class="score-number" id="verdict-score">--</span>
+        <span class="score-max">/100</span>
+      </div>
+    </div>
+
+    <div class="score-summary">
+      <h3 class="verdict-title" id="verdict-title">Selecciona un lote en Buenos Aires</h3>
+      <p class="verdict-desc" id="verdict-desc">
+        Haz click en el mapa satelital o elige uno de los partidos preconfigurados para iniciar el análisis multiagente con JEV y STAC.
+      </p>
+    </div>
+  </div>
+
+  <!-- Cultivos Sugeridos -->
+  <div class="section-box">
+    <h4 class="section-title">🌾 Especies y Cultivos Recomendados</h4>
+    <div class="chips-container" id="crops-container">
+      <span class="chip-item">Esperando análisis...</span>
+    </div>
+  </div>
+
+  <!-- Recomendaciones de Manejo Agronómico -->
+  <div class="section-box">
+    <h4 class="section-title">🚜 Recomendaciones y Sistematización</h4>
+    <ul class="recommendations-list" id="recomms-list">
+      <li>Selecciona un terreno para evaluar aptitud, obras de drenaje y manejo sustentable.</li>
+    </ul>
+  </div>
+</div>
+
+<style>
+  .verdict-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 20px;
+    background: rgba(13, 19, 35, 0.82);
+    min-height: 400px;
+  }
+
+  .verdict-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .header-badge-wrap {
+    display: flex;
+    gap: 8px;
+  }
+
+  .btn-sm {
+    padding: 5px 12px;
+    font-size: 0.75rem;
+  }
+
+  .score-hero {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    background: rgba(10, 15, 29, 0.7);
+    border: 1px solid var(--border-subtle);
+    border-radius: 14px;
+    padding: 16px 20px;
+  }
+
+  .score-circle-container {
+    position: relative;
+    width: 96px;
+    height: 96px;
+    flex-shrink: 0;
+  }
+
+  .score-svg {
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+  }
+
+  .score-bg-circle {
+    fill: none;
+    stroke: rgba(255, 255, 255, 0.08);
+    stroke-width: 8;
+  }
+
+  .score-fill-circle {
+    fill: none;
+    stroke: var(--color-agri);
+    stroke-width: 8;
+    stroke-dasharray: 264;
+    stroke-dashoffset: 264;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 1s cubic-bezier(0.16, 1, 0.3, 1), stroke 0.4s ease;
+  }
+
+  .score-text-box {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+  }
+
+  .score-number {
+    font-family: var(--font-heading);
+    font-size: 1.6rem;
+    font-weight: 800;
+    color: #ffffff;
+    line-height: 1;
+    display: block;
+  }
+
+  .score-max {
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    font-weight: 600;
+  }
+
+  .score-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .verdict-title {
+    font-family: var(--font-heading);
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #ffffff;
+    line-height: 1.2;
+  }
+
+  .verdict-desc {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    line-height: 1.45;
+  }
+
+  .section-box {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .section-title {
+    font-family: var(--font-heading);
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--text-main);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+
+  .chips-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .chip-item {
+    background: rgba(16, 185, 129, 0.12);
+    border: 1px solid rgba(16, 185, 129, 0.25);
+    color: var(--color-agri-light);
+    font-size: 0.76rem;
+    padding: 4px 10px;
+    border-radius: 8px;
+    font-weight: 500;
+  }
+
+  .recommendations-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .recommendations-list li {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+    padding-left: 18px;
+    position: relative;
+  }
+
+  .recommendations-list li::before {
+    content: "•";
+    position: absolute;
+    left: 4px;
+    color: var(--color-agri);
+    font-weight: bold;
+    font-size: 1.1rem;
+    line-height: 1;
+  }
+</style>

@@ -1,0 +1,294 @@
+---
+---
+
+<div class="map-wrapper glass-panel">
+  <!-- Barra de Presets Rápidos -->
+  <div class="presets-bar">
+    <span class="presets-label">Zonas Test PBA:</span>
+    <div class="presets-buttons" id="presets-container">
+      <button class="preset-btn active" data-id="chascomus_salado" data-lat="-35.5765" data-lon="-58.0125" data-name="Chascomús (Cuenca del Salado)">
+        🌊 Chascomús (Salado)
+      </button>
+      <button class="preset-btn" data-id="pergamino_nucleo" data-lat="-33.8920" data-lon="-60.5730" data-name="Pergamino (Zona Núcleo)">
+        🌽 Pergamino (Agrícola)
+      </button>
+      <button class="preset-btn" data-id="pehuajo_arenosa" data-lat="-35.8115" data-lon="-61.8950" data-name="Pehuajó (Pampa Arenosa)">
+        🌾 Pehuajó (Anegamiento Plano)
+      </button>
+      <button class="preset-btn" data-id="dolores_samborombon" data-lat="-36.3130" data-lon="-57.6790" data-name="Dolores (Samborombón)">
+        🦆 Dolores (Humedal)
+      </button>
+      <button class="preset-btn" data-id="tandil_serrana" data-lat="-37.3210" data-lon="-59.1330" data-name="Tandil (Serrana)">
+        ⛰️ Tandil (Drenaje Rápido)
+      </button>
+    </div>
+  </div>
+
+  <!-- Barra de Control de Coordenadas y Búsqueda -->
+  <div class="controls-bar">
+    <div class="input-group">
+      <label for="input-name">Nombre del Lote</label>
+      <input type="text" id="input-name" value="Campo Chascomús (Bajos)" placeholder="Identificación..." />
+    </div>
+
+    <div class="input-group small">
+      <label for="input-lat">Latitud</label>
+      <input type="number" id="input-lat" step="0.0001" value="-35.5765" />
+    </div>
+
+    <div class="input-group small">
+      <label for="input-lon">Longitud</label>
+      <input type="number" id="input-lon" step="0.0001" value="-58.0125" />
+    </div>
+
+    <button id="btn-analyze" class="btn btn-primary">
+      <span class="btn-icon">⚡</span>
+      <span class="btn-text">Ejecutar 3 Agentes JEV</span>
+    </button>
+  </div>
+
+  <!-- Contenedor del Mapa Leaflet -->
+  <div class="map-viewport-container">
+    <div id="leaflet-map"></div>
+
+    <!-- Controles flotantes sobre el mapa -->
+    <div class="map-overlay-controls">
+      <div class="layer-toggle-box glass-panel">
+        <span class="toggle-title">Capas Satelitales STAC:</span>
+        <label class="toggle-item">
+          <input type="checkbox" id="layer-jrc" checked />
+          <span>💧 JRC Agua 35 años</span>
+        </label>
+        <label class="toggle-item">
+          <input type="checkbox" id="layer-dem" />
+          <span>⛰️ Copernicus DEM</span>
+        </label>
+      </div>
+
+      <!-- Leyenda Dinámica -->
+      <div class="map-legend glass-panel">
+        <span class="legend-title">Recurrencia JRC (%)</span>
+        <div class="legend-bar">
+          <span class="color-stop stop-0"></span>
+          <span class="color-stop stop-25"></span>
+          <span class="color-stop stop-50"></span>
+          <span class="color-stop stop-75"></span>
+          <span class="color-stop stop-100"></span>
+        </div>
+        <div class="legend-labels">
+          <span>0% Seco</span>
+          <span>50%</span>
+          <span>100% Permanente</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Indicador de click en mapa -->
+    <div class="map-hint">
+      📍 Haz click en cualquier punto del mapa en Buenos Aires para auditar
+    </div>
+  </div>
+</div>
+
+<style>
+  .map-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    height: 100%;
+    min-height: 580px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .presets-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .presets-label {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    font-weight: 600;
+    white-space: nowrap;
+    text-transform: uppercase;
+  }
+
+  .presets-buttons {
+    display: flex;
+    gap: 8px;
+    flex-wrap: nowrap;
+  }
+
+  .preset-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--text-main);
+    padding: 5px 12px;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+    font-family: var(--font-body);
+  }
+
+  .preset-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+
+  .preset-btn.active {
+    background: rgba(16, 185, 129, 0.2);
+    border-color: var(--color-agri);
+    color: var(--color-agri-light);
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.25);
+  }
+
+  .controls-bar {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    background: rgba(10, 15, 29, 0.6);
+    padding: 10px 14px;
+    border-radius: 12px;
+    border: 1px solid var(--border-subtle);
+    flex-wrap: wrap;
+  }
+
+  .input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+    min-width: 130px;
+  }
+
+  .input-group.small {
+    flex: 0.6;
+    min-width: 100px;
+  }
+
+  .input-group label {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+
+  .input-group input {
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    padding: 7px 10px;
+    color: #ffffff;
+    font-size: 0.85rem;
+    font-family: var(--font-mono);
+    outline: none;
+    transition: border-color 0.2s ease;
+  }
+
+  .input-group input:focus {
+    border-color: var(--color-hydro);
+    box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.2);
+  }
+
+  #btn-analyze {
+    height: 38px;
+    white-space: nowrap;
+    padding: 0 20px;
+  }
+
+  .map-viewport-container {
+    flex: 1;
+    min-height: 440px;
+    border-radius: 12px;
+    overflow: hidden;
+    position: relative;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  #leaflet-map {
+    width: 100%;
+    height: 100%;
+    min-height: 440px;
+    background: #090e17;
+  }
+
+  .map-overlay-controls {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 1000;
+    pointer-events: none;
+  }
+
+  .layer-toggle-box, .map-legend {
+    pointer-events: auto;
+    padding: 8px 12px;
+    background: rgba(10, 15, 29, 0.88);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    font-size: 0.75rem;
+  }
+
+  .toggle-title, .legend-title {
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 6px;
+    display: block;
+    font-family: var(--font-heading);
+  }
+
+  .toggle-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-muted);
+    cursor: pointer;
+    margin-top: 4px;
+  }
+
+  .toggle-item input {
+    accent-color: var(--color-hydro);
+    cursor: pointer;
+  }
+
+  .legend-bar {
+    height: 8px;
+    width: 140px;
+    border-radius: 4px;
+    background: linear-gradient(to right, #00ffff, #0088ff, #0000ff, #5500aa, #ff0055);
+    margin: 4px 0;
+  }
+
+  .legend-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.65rem;
+    color: var(--text-dim);
+  }
+
+  .map-hint {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    background: rgba(10, 15, 29, 0.85);
+    backdrop-filter: var(--blur-glass);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 5px 12px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    z-index: 1000;
+    pointer-events: none;
+  }
+</style>

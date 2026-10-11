@@ -1,0 +1,361 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Header from '../components/Header.astro';
+import MapViewer from '../components/MapViewer.astro';
+import AgentMonitor from '../components/AgentMonitor.astro';
+import VerdictPanel from '../components/VerdictPanel.astro';
+---
+
+<Layout title="AgroJEV PBA | Auditoría Hídrica y Terrenos Cultivables">
+  <div class="dashboard-layout">
+    <Header />
+
+    <main class="dashboard-grid">
+      <!-- Columna Izquierda: Mapa Interactivo -->
+      <section class="grid-col map-column">
+        <MapViewer />
+      </section>
+
+      <!-- Columna Derecha: Pipeline Multiagente + Dictamen -->
+      <section class="grid-col agents-column">
+        <AgentMonitor />
+        <VerdictPanel />
+      </section>
+    </main>
+
+    <footer class="main-footer">
+      <div class="footer-content">
+        <span>AgroJEV PBA · Sistema Multiagente con JEV (TypeSafe System One) y Microsoft Planetary Computer STAC</span>
+        <span class="footer-links">
+          <span>Provincia de Buenos Aires</span> · <span>Copernicus DEM 30m</span> · <span>JRC Global Surface Water</span>
+        </span>
+      </div>
+    </footer>
+  </div>
+</Layout>
+
+<!-- Script interactivo cliente (Leaflet + Conexión FastAPI) -->
+<script is:inline src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script is:inline>
+  document.addEventListener('DOMContentLoaded', () => {
+    const API_BASE = 'http://localhost:8000';
+    let map = null;
+    let currentMarker = null;
+    let jrcLayer = null;
+    let demLayer = null;
+
+    // Coordenadas iniciales: Chascomús (Cuenca del Salado)
+    let selectedLat = -35.5765;
+    let selectedLon = -58.0125;
+    let selectedName = "Chascomús (Cuenca del Salado)";
+
+    // Elementos DOM
+    const inputLat = document.getElementById('input-lat');
+    const inputLon = document.getElementById('input-lon');
+    const inputName = document.getElementById('input-name');
+    const btnAnalyze = document.getElementById('btn-analyze');
+    const systemStatus = document.getElementById('system-status');
+    const presetButtons = document.querySelectorAll('.preset-btn');
+    const layerJrcCheckbox = document.getElementById('layer-jrc');
+    const layerDemCheckbox = document.getElementById('layer-dem');
+
+    // Inicializar Mapa Leaflet
+    function initMap() {
+      map = L.map('leaflet-map', {
+        center: [selectedLat, selectedLon],
+        zoom: 11,
+        zoomControl: true
+      });
+
+      // Capa base Satélite Esri
+      const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles &copy; Esri, Maxar, Earthstar Geographics',
+        maxZoom: 18
+      }).addTo(map);
+
+      // Etiquetas y rutas
+      L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+        attribution: '',
+        maxZoom: 18,
+        opacity: 0.7
+      }).addTo(map);
+
+      // Marcador de parcela
+      const farmIcon = L.divIcon({
+        className: 'custom-farm-pin',
+        html: `<div style="background:#10b981; width:22px; height:22px; border-radius:50%; border:3px solid #ffffff; box-shadow:0 0 14px #10b981;"></div>`,
+        iconSize: [22, 22],
+        iconAnchor: [11, 11]
+      });
+
+      currentMarker = L.marker([selectedLat, selectedLon], { icon: farmIcon }).addTo(map);
+      currentMarker.bindPopup(`<b>${selectedName}</b><br>Lat: ${selectedLat}<br>Lon: ${selectedLon}`).openPopup();
+
+      // Click en el mapa para auditar cualquier punto
+      map.on('click', (e) => {
+        const lat = parseFloat(e.latlng.lat.toFixed(4));
+        const lon = parseFloat(e.latlng.lng.toFixed(4));
+        setCoordinates(lat, lon, `Lote (${lat}, ${lon})`);
+      });
+
+      // Toggles de capas
+      layerJrcCheckbox?.addEventListener('change', (e) => {
+        if (jrcLayer) {
+          if (e.target.checked) map.addLayer(jrcLayer);
+          else map.removeLayer(jrcLayer);
+        }
+      });
+
+      layerDemCheckbox?.addEventListener('change', (e) => {
+        if (demLayer) {
+          if (e.target.checked) map.addLayer(demLayer);
+          else map.removeLayer(demLayer);
+        }
+      });
+    }
+
+    function setCoordinates(lat, lon, name) {
+      selectedLat = lat;
+      selectedLon = lon;
+      selectedName = name || `Lote (${lat}, ${lon})`;
+
+      if (inputLat) inputLat.value = lat;
+      if (inputLon) inputLon.value = lon;
+      if (inputName) inputName.value = selectedName;
+
+      if (currentMarker && map) {
+        currentMarker.setLatLng([lat, lon]);
+        currentMarker.setPopupContent(`<b>${selectedName}</b><br>Lat: ${lat}<br>Lon: ${lon}`).openPopup();
+        map.flyTo([lat, lon], 12, { duration: 1.2 });
+      }
+    }
+
+    // Configurar capas STAC dinámicas devueltas por Planetary Computer
+    function updateStacTileLayers(tileLayers) {
+      if (!tileLayers || !map) return;
+
+      tileLayers.forEach(layer => {
+        if (layer.name === 'jrc_water_occurrence') {
+          if (jrcLayer) map.removeLayer(jrcLayer);
+          jrcLayer = L.tileLayer(layer.tile_url, {
+            opacity: 0.65,
+            attribution: layer.attribution,
+            maxZoom: 18
+          });
+          if (layerJrcCheckbox?.checked) jrcLayer.addTo(map);
+        } else if (layer.name === 'copernicus_dem') {
+          if (demLayer) map.removeLayer(demLayer);
+          demLayer = L.tileLayer(layer.tile_url, {
+            opacity: 0.5,
+            attribution: layer.attribution,
+            maxZoom: 18
+          });
+          if (layerDemCheckbox?.checked) demLayer.addTo(map);
+        }
+      });
+    }
+
+    // Comprobar estado del backend
+    async function checkBackendHealth() {
+      try {
+        const res = await fetch(`${API_BASE}/api/health`);
+        if (res.ok) {
+          const data = await res.json();
+          if (systemStatus) {
+            systemStatus.innerHTML = `<span class="status-dot"></span><span>JEV Backend Conectado</span>`;
+          }
+        }
+      } catch (err) {
+        if (systemStatus) {
+          systemStatus.innerHTML = `<span class="status-dot" style="background:#ef4444; box-shadow:0 0 8px #ef4444;"></span><span style="color:#f87171;">Backend Offline</span>`;
+        }
+      }
+    }
+
+    // Ejecutar Pipeline Multiagente
+    async function runAnalysis() {
+      const lat = parseFloat(inputLat.value);
+      const lon = parseFloat(inputLon.value);
+      const name = inputName.value.trim() || "Lote Rural";
+
+      btnAnalyze.disabled = true;
+      btnAnalyze.innerHTML = `<span class="spinning">⏳</span><span>Procesando 3 Agentes JEV...</span>`;
+
+      // Estados visuales de los agentes en ejecución
+      const status1 = document.getElementById('status-agent-1');
+      const status2 = document.getElementById('status-agent-2');
+      const status3 = document.getElementById('status-agent-3');
+
+      status1.className = "status-pill status-running"; status1.textContent = "Extrayendo STAC...";
+      status2.className = "status-pill status-ready"; status2.textContent = "En cola";
+      status3.className = "status-pill status-ready"; status3.textContent = "En cola";
+
+      try {
+        const res = await fetch(`${API_BASE}/api/analyze`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lat, lon, parcel_name: name })
+        });
+
+        if (!res.ok) throw new Error("Error en el servidor al evaluar");
+        const data = await res.json();
+
+        // Actualizar capas de mapa con teselas STAC de Planetary
+        updateStacTileLayers(data.geospatial.tile_layers);
+
+        // Agente 1 Completado
+        status1.className = "status-pill status-done"; status1.textContent = "Completado";
+        document.getElementById('val-cota').textContent = `${data.geospatial.elevation_m} m`;
+        document.getElementById('val-slope').textContent = `${data.geospatial.slope_deg}°`;
+        document.getElementById('val-jrc-pct').textContent = `${data.geospatial.jrc_occurrence_pct}%`;
+        document.getElementById('val-sar').textContent = `${data.geospatial.sar_backscatter_db} dB`;
+
+        // Agente 2 Completado (JEV Riesgo Hidrológico)
+        status2.className = "status-pill status-done"; status2.textContent = "JEV Resuelto";
+        const noulProb = data.hydro_risk.riesgo_inundacion_severo_prob;
+        document.getElementById('val-noul-prob').textContent = `${(noulProb * 100).toFixed(1)}%`;
+        document.getElementById('noul-fill').style.width = `${Math.min(100, noulProb * 100)}%`;
+        document.getElementById('val-topo-score').textContent = data.hydro_risk.vulnerabilidad_topografica_label;
+        document.getElementById('val-mecanismo').textContent = data.hydro_risk.mecanismo_hidrico_label;
+        document.getElementById('val-hydro-conf').textContent = `${(data.hydro_risk.confidence * 100).toFixed(0)}%`;
+
+        // Agente 3 Completado (JEV Dictamen Agronómico)
+        status3.className = "status-pill status-done"; status3.textContent = "JEV Dictamen";
+        document.getElementById('val-aptitud-tag').textContent = data.verdict.aptitud_productiva_label;
+        document.getElementById('val-resiliencia').textContent = data.verdict.resiliencia_climatica_label;
+        document.getElementById('val-obras').textContent = data.verdict.requiere_obras_drenaje ? "Sí (Recomendado)" : "No Requeridas";
+
+        // Actualizar Panel de Dictamen Ejecutivo
+        const score = data.verdict.score_aptitud_agricola;
+        document.getElementById('verdict-score').textContent = score;
+
+        // Círculo de score
+        const scoreCircle = document.getElementById('score-meter');
+        const circumference = 2 * Math.PI * 42; // ~264
+        const offset = circumference - (score / 100) * circumference;
+        scoreCircle.style.strokeDashoffset = offset;
+
+        // Semáforo y color del círculo
+        const badgeSemaforo = document.getElementById('badge-semaforo');
+        if (data.verdict.color_semaforo === 'verde') {
+          scoreCircle.style.stroke = '#10b981';
+          badgeSemaforo.className = "badge badge-agri";
+          badgeSemaforo.textContent = "Apto Cultivo / Seguro";
+        } else if (data.verdict.color_semaforo === 'amarillo') {
+          scoreCircle.style.stroke = '#f59e0b';
+          badgeSemaforo.className = "badge badge-warning";
+          badgeSemaforo.textContent = "Aptitud Mixta / Alerta Hídrica";
+        } else {
+          scoreCircle.style.stroke = '#ef4444';
+          badgeSemaforo.className = "badge badge-danger";
+          badgeSemaforo.textContent = "No Cultivable / Alto Riesgo";
+        }
+
+        document.getElementById('verdict-title').textContent = data.verdict.aptitud_productiva_label;
+        document.getElementById('verdict-desc').textContent = data.verdict.dictamen_ejecutivo;
+
+        // Cultivos
+        const cropsBox = document.getElementById('crops-container');
+        cropsBox.innerHTML = data.verdict.cultivos_sugeridos.map(c => `<span class="chip-item">${c}</span>`).join('');
+
+        // Recomendaciones
+        const recommsBox = document.getElementById('recomms-list');
+        recommsBox.innerHTML = data.verdict.recomendaciones_agronomicas.map(r => `<li>${r}</li>`).join('');
+
+        // Badge de tiempo
+        document.getElementById('total-time-badge').textContent = `Completado en ${data.execution_time_total_ms} ms`;
+
+      } catch (err) {
+        console.error(err);
+        alert("Ocurrió un error al contactar el backend FastAPI o la API de JEV: " + err.message);
+      } finally {
+        btnAnalyze.disabled = false;
+        btnAnalyze.innerHTML = `<span class="btn-icon">⚡</span><span class="btn-text">Ejecutar 3 Agentes JEV</span>`;
+      }
+    }
+
+    // Presets Click
+    presetButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        presetButtons.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        const lat = parseFloat(btn.dataset.lat);
+        const lon = parseFloat(btn.dataset.lon);
+        const name = btn.dataset.name;
+
+        setCoordinates(lat, lon, name);
+        runAnalysis();
+      });
+    });
+
+    btnAnalyze?.addEventListener('click', runAnalysis);
+
+    // Botón Copiar Informe
+    document.getElementById('btn-copy-report')?.addEventListener('click', () => {
+      const title = document.getElementById('verdict-title').textContent;
+      const score = document.getElementById('verdict-score').textContent;
+      const desc = document.getElementById('verdict-desc').textContent;
+      const text = `INFORME AGROJEV PBA\nLote: ${inputName.value} (Lat: ${inputLat.value}, Lon: ${inputLon.value})\nAptitud: ${title} (${score}/100)\nDictamen: ${desc}\nGenerado con JEV System One & Microsoft Planetary Computer.`;
+      navigator.clipboard.writeText(text).then(() => {
+        alert("¡Informe copiado al portapapeles!");
+      });
+    });
+
+    // Iniciar
+    initMap();
+    checkBackendHealth();
+    // Ejecutar análisis automático del preset inicial
+    setTimeout(runAnalysis, 600);
+  });
+</script>
+
+<style>
+  .dashboard-layout {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+
+  .dashboard-grid {
+    display: grid;
+    grid-template-columns: 1.15fr 0.85fr;
+    gap: 20px;
+    padding: 16px 20px;
+    flex: 1;
+  }
+
+  .grid-col {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .main-footer {
+    padding: 14px 24px;
+    margin: 0 20px 16px 20px;
+    background: rgba(10, 15, 29, 0.7);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+  }
+
+  .footer-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.74rem;
+    color: var(--text-dim);
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .footer-links {
+    color: var(--text-muted);
+  }
+
+  @media (max-width: 1100px) {
+    .dashboard-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
