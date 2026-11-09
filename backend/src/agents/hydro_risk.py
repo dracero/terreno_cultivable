@@ -22,7 +22,7 @@ MECANISMO_LABELS = {
 
 class HydroRiskAgent:
     """
-    Agente 2: Evaluación de Riesgo Hidrológico.
+    Agente 2: Evaluación de Riesgo Hidrológico y Geomorfológico.
     Utiliza JEV (TypeSafe System One) para emitir juicios tipados (Noul, Score, Choice)
     calibrados matemáticamente sobre la probabilidad y mecanismo de anegamiento del lote.
     """
@@ -33,13 +33,27 @@ class HydroRiskAgent:
         start_time = time.perf_counter()
         logger.info(f"[{self.name}] Evaluando riesgo hidrológico con JEV para {geo_state.parcel_name}...")
 
-        # Estructuramos el estado semántico para Jev
+        geom = geo_state.topography.geomorphology
+        zones_summary = {
+            z.zone_id: f"{z.percentage}% ({z.area_ha} ha)"
+            for z in geo_state.topography.terrain_zones
+        }
+
+        # Estructuramos el estado semántico enriquecido con índices topográficos para Jev
         jev_state = {
             "parcela": geo_state.parcel_name,
             "ubicacion": f"Provincia de Buenos Aires (Lat: {geo_state.lat}, Lon: {geo_state.lon})",
+            "unidad_geomorfologica": geom.region_geomorphology,
+            "red_drenaje": geom.drainage_network_type,
             "cota_elevacion_msnm": geo_state.elevation_m,
+            "amplitud_relieve_m": geom.relief_amplitude_m,
             "pendiente_grados": geo_state.slope_deg,
+            "pendiente_porcentaje": geom.slope_pct,
             "indice_depresion_relativa_0_a_1": geo_state.relative_depression_score,
+            "indice_humedad_topografica_twi": geom.twi_value,
+            "indice_posicion_topografica_tpi_m": geom.tpi_value_m,
+            "profundidad_napa_freatica_estimada_m": geom.estimated_water_table_depth_m,
+            "distribucion_ambientes_lote": zones_summary,
             "recurrencia_historica_agua_jrc_pct": geo_state.jrc_occurrence_pct,
             "estacionalidad_agua": geo_state.jrc_seasonality,
             "retrodispersion_radar_sar_db": geo_state.sar_backscatter_db,
@@ -50,8 +64,10 @@ class HydroRiskAgent:
         questions = {
             "riesgo_severo": Noul(
                 instructions=(
-                    "Considerando el régimen hidrológico de la Provincia de Buenos Aires (Cuenca del Salado / Pampa), "
-                    "¿este lote presenta una alta probabilidad de anegamiento crítico o persistente bajo períodos de lluvias copiosas?"
+                    "Considerando el régimen hidrológico de la Provincia de Buenos Aires, el índice TWI "
+                    "(`indice_humedad_topografica_twi`), la profundidad de napa (`profundidad_napa_freatica_estimada_m`) "
+                    "y la recurrencia histórica JRC (`recurrencia_historica_agua_jrc_pct`), ¿este lote presenta "
+                    "una alta probabilidad de anegamiento crítico o persistente bajo períodos de lluvias copiosas?"
                 )
             ),
             "vulnerabilidad_topografica": Score(
@@ -93,11 +109,11 @@ class HydroRiskAgent:
 
         # Resumen hidrológico
         if noul_val > 0.65:
-            resumen = f"Riesgo hídrico crítico ({int(noul_val*100)}%). Sujeto a {choice_label.lower()} con drenaje deficiente."
+            resumen = f"Riesgo hídrico crítico ({int(noul_val*100)}%). Sujeto a {choice_label.lower()} con drenaje deficiente (TWI {geom.twi_value})."
         elif noul_val > 0.35:
-            resumen = f"Riesgo hídrico moderado/intermedio ({int(noul_val*100)}%). Vulnerabilidad en eventos Niño."
+            resumen = f"Riesgo hídrico moderado/intermedio ({int(noul_val*100)}%). Vulnerabilidad en eventos Niño (Napa est. {geom.estimated_water_table_depth_m}m)."
         else:
-            resumen = f"Riesgo hídrico bajo ({int(noul_val*100)}%). Buena posición topográfica y drenaje favorable."
+            resumen = f"Riesgo hídrico bajo ({int(noul_val*100)}%). Buena posición topográfica y drenaje favorable (Pendiente {geom.slope_pct}%)."
 
         profile = HydroRiskProfile(
             riesgo_inundacion_severo_prob=noul_val,

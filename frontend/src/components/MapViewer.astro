@@ -24,11 +24,11 @@
     </div>
   </div>
 
-  <!-- Barra de Control de Coordenadas y Búsqueda -->
+  <!-- Barra de Control de Coordenadas, Superficie y Búsqueda -->
   <div class="controls-bar">
     <div class="input-group">
       <label for="input-name">Nombre del Lote</label>
-      <input type="text" id="input-name" value="Campo Chascomús (Bajos)" placeholder="Identificación..." />
+      <input type="text" id="input-name" value="Chascomús (Cuenca del Salado)" placeholder="Identificación..." />
     </div>
 
     <div class="input-group small">
@@ -41,10 +41,34 @@
       <input type="number" id="input-lon" step="0.0001" value="-58.0125" />
     </div>
 
+    <div class="input-group xsmall">
+      <label for="input-area">Superficie (ha)</label>
+      <input type="number" id="input-area" min="10" max="5000" step="10" value="120" />
+    </div>
+
     <button id="btn-analyze" class="btn btn-primary">
       <span class="btn-icon">⚡</span>
-      <span class="btn-text">Ejecutar 3 Agentes JEV</span>
+      <span class="btn-text">Analizar Terreno</span>
     </button>
+  </div>
+
+  <!-- Barra de Herramientas Topográficas del Mapa -->
+  <div class="topo-toolbar">
+    <div class="mode-switch-group">
+      <span class="toolbar-label">Modo Interacción:</span>
+      <button type="button" class="mode-btn active" id="mode-audit-btn" title="Hacer click en el mapa para auditar una nueva coordenada">
+        📍 Auditar Lote
+      </button>
+      <button type="button" class="mode-btn" id="mode-transect-btn" title="Hacer click en dos puntos (A y B) dentro del mapa para trazar un corte topográfico a medida">
+        📏 Trazar Corte Topográfico (A → B)
+      </button>
+    </div>
+
+    <div class="topo-quick-stats" id="map-topo-summary">
+      <span class="quick-stat">Equidistancia: <strong id="stat-contour-int">-- m</strong></span>
+      <span class="quick-stat">Desnivel ΔH: <strong id="stat-relief-amp">-- m</strong></span>
+      <span class="quick-stat">Pendiente: <strong id="stat-slope-pct">--%</strong></span>
+    </div>
   </div>
 
   <!-- Contenedor del Mapa Leaflet -->
@@ -54,6 +78,25 @@
     <!-- Controles flotantes sobre el mapa -->
     <div class="map-overlay-controls">
       <div class="layer-toggle-box glass-panel">
+        <span class="toggle-title">Capas Topográficas (DEM Local):</span>
+        <label class="toggle-item">
+          <input type="checkbox" id="layer-contours" checked />
+          <span>〰️ Curvas de Nivel (Isolíneas)</span>
+        </label>
+        <label class="toggle-item">
+          <input type="checkbox" id="layer-flow" checked />
+          <span>➡️ Vectores Escurrimiento D8</span>
+        </label>
+        <label class="toggle-item">
+          <input type="checkbox" id="layer-zones" />
+          <span>🗺️ Zonificación por Ambientes</span>
+        </label>
+        <label class="toggle-item">
+          <input type="checkbox" id="layer-transect" checked />
+          <span>📐 Línea de Corte Activa</span>
+        </label>
+
+        <div class="toggle-divider"></div>
         <span class="toggle-title">Capas Satelitales STAC:</span>
         <label class="toggle-item">
           <input type="checkbox" id="layer-jrc" checked />
@@ -61,12 +104,20 @@
         </label>
         <label class="toggle-item">
           <input type="checkbox" id="layer-dem" />
-          <span>⛰️ Copernicus DEM</span>
+          <span>⛰️ Copernicus DEM Regional</span>
         </label>
       </div>
 
-      <!-- Leyenda Dinámica -->
+      <!-- Leyenda Topográfica y de Ambientes -->
       <div class="map-legend glass-panel">
+        <span class="legend-title">Ambientes y Topografía</span>
+        <div class="env-legend-items">
+          <div class="env-dot-row"><span class="dot" style="background:#10b981;"></span><span>Loma Alta (Drenaje óptimo)</span></div>
+          <div class="env-dot-row"><span class="dot" style="background:#3b82f6;"></span><span>Media Loma (Transición)</span></div>
+          <div class="env-dot-row"><span class="dot" style="background:#f59e0b;"></span><span>Bajo Dulce (Receptor)</span></div>
+          <div class="env-dot-row"><span class="dot" style="background:#ef4444;"></span><span>Bajo Inundable / Cubeta</span></div>
+        </div>
+        <div class="toggle-divider"></div>
         <span class="legend-title">Recurrencia JRC (%)</span>
         <div class="legend-bar">
           <span class="color-stop stop-0"></span>
@@ -78,14 +129,14 @@
         <div class="legend-labels">
           <span>0% Seco</span>
           <span>50%</span>
-          <span>100% Permanente</span>
+          <span>100% Agua</span>
         </div>
       </div>
     </div>
 
-    <!-- Indicador de click en mapa -->
-    <div class="map-hint">
-      📍 Haz click en cualquier punto del mapa en Buenos Aires para auditar
+    <!-- Indicador dinámico de click en mapa -->
+    <div class="map-hint" id="map-hint-banner">
+      📍 Modo Auditoría: Haz click en cualquier punto del mapa para analizar su topografía y riesgo hídrico
     </div>
   </div>
 </div>
@@ -94,10 +145,10 @@
   .map-wrapper {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
     padding: 16px;
     height: 100%;
-    min-height: 580px;
+    min-height: 620px;
     position: relative;
     overflow: hidden;
   }
@@ -105,13 +156,13 @@
   .presets-bar {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
     overflow-x: auto;
-    padding-bottom: 4px;
+    padding-bottom: 2px;
   }
 
   .presets-label {
-    font-size: 0.78rem;
+    font-size: 0.75rem;
     color: var(--text-muted);
     font-weight: 600;
     white-space: nowrap;
@@ -120,7 +171,7 @@
 
   .presets-buttons {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     flex-wrap: nowrap;
   }
 
@@ -128,9 +179,9 @@
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.08);
     color: var(--text-main);
-    padding: 5px 12px;
+    padding: 5px 11px;
     border-radius: 8px;
-    font-size: 0.78rem;
+    font-size: 0.76rem;
     font-weight: 500;
     cursor: pointer;
     white-space: nowrap;
@@ -153,7 +204,7 @@
   .controls-bar {
     display: flex;
     align-items: flex-end;
-    gap: 12px;
+    gap: 10px;
     background: rgba(10, 15, 29, 0.6);
     padding: 10px 14px;
     border-radius: 12px;
@@ -165,17 +216,22 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
-    flex: 1;
+    flex: 1.2;
     min-width: 130px;
   }
 
   .input-group.small {
-    flex: 0.6;
-    min-width: 100px;
+    flex: 0.65;
+    min-width: 92px;
+  }
+
+  .input-group.xsmall {
+    flex: 0.5;
+    min-width: 82px;
   }
 
   .input-group label {
-    font-size: 0.72rem;
+    font-size: 0.7rem;
     color: var(--text-muted);
     font-weight: 600;
     text-transform: uppercase;
@@ -187,7 +243,7 @@
     border-radius: 8px;
     padding: 7px 10px;
     color: #ffffff;
-    font-size: 0.85rem;
+    font-size: 0.83rem;
     font-family: var(--font-mono);
     outline: none;
     transition: border-color 0.2s ease;
@@ -199,14 +255,78 @@
   }
 
   #btn-analyze {
-    height: 38px;
+    height: 36px;
     white-space: nowrap;
-    padding: 0 20px;
+    padding: 0 16px;
+  }
+
+  .topo-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 12px;
+    background: rgba(6, 182, 212, 0.07);
+    border: 1px solid rgba(6, 182, 212, 0.2);
+    border-radius: 10px;
+    flex-wrap: wrap;
+  }
+
+  .mode-switch-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .toolbar-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--color-hydro-light);
+    text-transform: uppercase;
+    margin-right: 4px;
+  }
+
+  .mode-btn {
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: var(--text-muted);
+    padding: 4px 10px;
+    border-radius: 7px;
+    font-size: 0.74rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-family: var(--font-body);
+  }
+
+  .mode-btn:hover {
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.25);
+  }
+
+  .mode-btn.active {
+    background: rgba(6, 182, 212, 0.22);
+    border-color: var(--color-hydro);
+    color: #ffffff;
+    box-shadow: 0 0 10px rgba(6, 182, 212, 0.25);
+  }
+
+  .topo-quick-stats {
+    display: flex;
+    gap: 12px;
+    font-size: 0.73rem;
+    color: var(--text-muted);
+  }
+
+  .quick-stat strong {
+    color: var(--color-hydro-light);
+    font-family: var(--font-mono);
   }
 
   .map-viewport-container {
     flex: 1;
-    min-height: 440px;
+    min-height: 460px;
     border-radius: 12px;
     overflow: hidden;
     position: relative;
@@ -216,36 +336,44 @@
   #leaflet-map {
     width: 100%;
     height: 100%;
-    min-height: 440px;
+    min-height: 460px;
     background: #090e17;
   }
 
   .map-overlay-controls {
     position: absolute;
-    top: 14px;
-    right: 14px;
+    top: 12px;
+    right: 12px;
     display: flex;
     flex-direction: column;
     gap: 8px;
     z-index: 1000;
     pointer-events: none;
+    max-width: 215px;
   }
 
   .layer-toggle-box, .map-legend {
     pointer-events: auto;
-    padding: 8px 12px;
-    background: rgba(10, 15, 29, 0.88);
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    padding: 9px 12px;
+    background: rgba(10, 15, 29, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: 10px;
-    font-size: 0.75rem;
+    font-size: 0.73rem;
+  }
+
+  .toggle-divider {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.08);
+    margin: 7px 0;
   }
 
   .toggle-title, .legend-title {
     font-weight: 700;
     color: #ffffff;
-    margin-bottom: 6px;
+    margin-bottom: 4px;
     display: block;
     font-family: var(--font-heading);
+    font-size: 0.74rem;
   }
 
   .toggle-item {
@@ -255,6 +383,11 @@
     color: var(--text-muted);
     cursor: pointer;
     margin-top: 4px;
+    font-size: 0.72rem;
+  }
+
+  .toggle-item:hover {
+    color: #ffffff;
   }
 
   .toggle-item input {
@@ -262,9 +395,31 @@
     cursor: pointer;
   }
 
+  .env-legend-items {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin-top: 4px;
+  }
+
+  .env-dot-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.69rem;
+    color: var(--text-muted);
+  }
+
+  .env-dot-row .dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+
   .legend-bar {
-    height: 8px;
-    width: 140px;
+    height: 7px;
+    width: 100%;
     border-radius: 4px;
     background: linear-gradient(to right, #00ffff, #0088ff, #0000ff, #5500aa, #ff0055);
     margin: 4px 0;
@@ -273,7 +428,7 @@
   .legend-labels {
     display: flex;
     justify-content: space-between;
-    font-size: 0.65rem;
+    font-size: 0.64rem;
     color: var(--text-dim);
   }
 
@@ -281,12 +436,12 @@
     position: absolute;
     bottom: 12px;
     left: 12px;
-    background: rgba(10, 15, 29, 0.85);
+    background: rgba(10, 15, 29, 0.88);
     backdrop-filter: var(--blur-glass);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 8px;
-    padding: 5px 12px;
-    font-size: 0.75rem;
+    padding: 6px 12px;
+    font-size: 0.74rem;
     color: var(--text-muted);
     z-index: 1000;
     pointer-events: none;

@@ -25,13 +25,93 @@ class TileLayerInfo(BaseModel):
     attribution: str
     colormap: Optional[str] = None
 
+class ContourLine(BaseModel):
+    elevation_m: float = Field(..., description="Cota de la curva de nivel en msnm")
+    is_major: bool = Field(default=False, description="Indica si es curva maestra o principal")
+    polylines: List[List[List[float]]] = Field(..., description="Lista de polilíneas [[lat, lon], ...]")
+
+class FlowVector(BaseModel):
+    lat: float
+    lon: float
+    target_lat: float
+    target_lon: float
+    azimuth_deg: float
+    slope_pct: float
+    flow_accumulation: int
+    is_drainage_channel: bool = False
+
+class ProfilePoint(BaseModel):
+    distance_m: float
+    lat: float
+    lon: float
+    elevation_m: float
+    water_table_msnm: float
+    water_table_depth_m: float
+    slope_local_pct: float
+    zone_id: str
+
+class ElevationProfile(BaseModel):
+    profile_id: str
+    title: str
+    total_distance_m: float
+    min_elevation_m: float
+    max_elevation_m: float
+    relief_delta_m: float
+    avg_slope_pct: float
+    max_slope_pct: float
+    points: List[ProfilePoint]
+
+class TerrainZoneStat(BaseModel):
+    zone_id: str
+    zone_name: str
+    percentage: float
+    area_ha: float
+    mean_elevation_m: float
+    color_hex: str
+    agronomic_use: str
+
+class GeomorphologyMetrics(BaseModel):
+    region_geomorphology: str
+    soil_taxonomy_inta: str
+    drainage_network_type: str
+    slope_pct: float
+    max_slope_pct: float
+    min_elevation_m: float
+    max_elevation_m: float
+    relief_amplitude_m: float
+    contour_interval_m: float
+    twi_value: float
+    twi_label: str
+    tpi_value_m: float
+    tpi_label: str
+    tri_rugosity_m: float
+    aspect_deg: float
+    aspect_cardinal: str
+    ls_erosion_factor: float
+    erosion_risk_label: str
+    estimated_water_table_depth_m: float
+
+class TopographicAnalysisData(BaseModel):
+    grid_lats: List[float]
+    grid_lons: List[float]
+    elevation_grid: List[List[float]]
+    zone_grid: List[List[str]]
+    water_table_base_msnm: float
+    geomorphology: GeomorphologyMetrics
+    terrain_zones: List[TerrainZoneStat]
+    contours: List[ContourLine]
+    flow_vectors: List[FlowVector]
+    elevation_profiles: List[ElevationProfile]
+
 class GeospatialState(BaseModel):
     parcel_name: str
     lat: float
     lon: float
+    area_ha: float = 100.0
     bbox: List[float]
     elevation_m: float
     slope_deg: float
+    slope_pct: float = 0.1
     relative_depression_score: float # 0.0 (loma) a 1.0 (cubeta cerrada)
     jrc_occurrence_pct: float # 0 a 100%
     jrc_max_extent: bool # True si alguna vez se inundó en los últimos 35 años
@@ -40,6 +120,7 @@ class GeospatialState(BaseModel):
     sentinel2_ndwi: float # índice de agua / humedad (-1 a 1)
     stac_items_found: Dict[str, str]
     tile_layers: List[TileLayerInfo]
+    topography: TopographicAnalysisData
 
 class HydroRiskProfile(BaseModel):
     riesgo_inundacion_severo_prob: float = Field(..., description="Probabilidad Noul de anegamiento crítico")
@@ -55,6 +136,13 @@ class AgroVerdict(BaseModel):
     aptitud_productiva: str
     aptitud_productiva_label: str
     aptitud_probabilities: Dict[str, float]
+    clase_capacidad_uso_inta: str = "clase_I_II"
+    clase_capacidad_uso_label: str = "Clase I-II (Agrícola sin limitaciones severas)"
+    limitante_edafica_codigo: str = "sin_limitante"
+    limitante_edafica_label: str = "Sin limitantes críticas"
+    indice_productividad_ip: int = 75
+    manejo_por_ambientes_recomendado: bool = True
+    manejo_por_ambientes_prob: float = 0.65
     resiliencia_climatica_score: int # 0 a 2
     resiliencia_climatica_label: str
     requiere_obras_drenaje: bool

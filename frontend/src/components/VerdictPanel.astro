@@ -29,6 +29,11 @@
       <p class="verdict-desc" id="verdict-desc">
         Haz click en el mapa satelital o elige uno de los partidos preconfigurados para iniciar el análisis multiagente con JEV y STAC.
       </p>
+      <div class="edaphic-pills-row">
+        <span class="edaphic-pill" id="verdict-inta-class">Capacidad INTA: --</span>
+        <span class="edaphic-pill" id="verdict-inta-limit">Limitante: --</span>
+        <span class="edaphic-pill" id="verdict-inta-ip">Índice Productividad (IP): --</span>
+      </div>
     </div>
   </div>
 
@@ -155,6 +160,24 @@
     font-size: 0.82rem;
     color: var(--text-muted);
     line-height: 1.45;
+  }
+
+  .edaphic-pills-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+  }
+
+  .edaphic-pill {
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 6px;
+    background: rgba(6, 182, 212, 0.12);
+    border: 1px solid rgba(6, 182, 212, 0.28);
+    color: var(--color-hydro-light);
+    font-family: var(--font-mono);
   }
 
   .section-box {

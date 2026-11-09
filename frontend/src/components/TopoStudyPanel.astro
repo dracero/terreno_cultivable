@@ -1,0 +1,549 @@
+---
+---
+
+<section class="topo-study-panel glass-panel" id="topo-study-section">
+  <div class="topo-header">
+    <div class="topo-title-wrap">
+      <div class="topo-icon">🗺️</div>
+      <div>
+        <h2 class="topo-main-title">Laboratorio Topográfico, Geomorfológico y Zonificación por Ambientes</h2>
+        <p class="topo-subtitle" id="topo-region-subtitle">
+          Modelado Digital de Elevación (DEM), perfiles de corte con nivel freático, índices hidro-topográficos (TWI / TPI / USLE) y ambientes edáficos INTA
+        </p>
+      </div>
+    </div>
+
+    <div class="topo-actions">
+      <button type="button" class="btn btn-secondary btn-sm" id="btn-export-geojson" title="Descargar curvas de nivel, vectores de flujo y perfiles en formato GeoJSON">
+        ⬇️ Exportar GeoJSON Topográfico
+      </button>
+    </div>
+  </div>
+
+  <!-- BLOQUE 1: PERFIL DE ELEVACIÓN Y CORTE TOPOGRÁFICO INTERACTIVO -->
+  <div class="profile-section-card">
+    <div class="profile-top-bar">
+      <div class="profile-tabs" id="profile-tabs-container">
+        <button type="button" class="profile-tab active" data-profile="north_south">
+          ↕️ Corte Norte → Sur (N-S)
+        </button>
+        <button type="button" class="profile-tab" data-profile="west_east">
+          ↔️ Corte Oeste → Este (O-E)
+        </button>
+        <button type="button" class="profile-tab" data-profile="drainage_axis">
+          ↘️ Eje de Escurrimiento (NO-SE)
+        </button>
+        <button type="button" class="profile-tab" data-profile="custom_ab" id="tab-custom-ab">
+          📏 Corte Libre A → B (Mapa)
+        </button>
+      </div>
+
+      <div class="profile-kpis">
+        <span class="pkpi">Cota Mín: <strong id="prof-min-z">-- m</strong></span>
+        <span class="pkpi">Cota Máx: <strong id="prof-max-z">-- m</strong></span>
+        <span class="pkpi">Desnivel: <strong id="prof-delta-z">-- m</strong></span>
+        <span class="pkpi">Pend. Media: <strong id="prof-avg-slope">--%</strong></span>
+        <span class="pkpi">Distancia: <strong id="prof-dist">-- m</strong></span>
+      </div>
+    </div>
+
+    <!-- Gráfico SVG Interactivo de Corte Topográfico -->
+    <div class="profile-chart-wrapper" id="profile-chart-box">
+      <svg id="topo-profile-svg" viewBox="0 0 860 230" preserveAspectRatio="none">
+        <!-- Se renderiza dinámicamente desde el cliente con terreno + napa freática + ambientes -->
+      </svg>
+
+      <!-- Tooltip Flotante Sincronizado con el Mapa -->
+      <div class="profile-hover-tooltip" id="profile-tooltip" style="display: none;">
+        <div class="tt-title" id="tt-zone">Media Loma</div>
+        <div class="tt-row"><span>Distancia:</span> <strong id="tt-dist">0 m</strong></div>
+        <div class="tt-row"><span>Cota Terreno:</span> <strong id="tt-elev">0.0 msnm</strong></div>
+        <div class="tt-row"><span>Prof. Napa Freática:</span> <strong id="tt-napa">0.0 m</strong></div>
+        <div class="tt-row"><span>Pendiente Local:</span> <strong id="tt-slope">0.0%</strong></div>
+      </div>
+    </div>
+
+    <div class="profile-legend-bar">
+      <div class="pleg-left">
+        <span class="pleg-item"><span class="line-swatch surface-swatch"></span> Cota Superficial del Terreno (msnm)</span>
+        <span class="pleg-item"><span class="line-swatch watertable-swatch"></span> Nivel Estimado de Napa Freática (msnm)</span>
+      </div>
+      <span class="pleg-hint">💡 Pasa el cursor sobre el perfil para inspeccionar el punto exacto en el mapa satelital</span>
+    </div>
+  </div>
+
+  <!-- BLOQUE 2: ÍNDICES GEOMORFOLÓGICOS, HIDROLÓGICOS Y EDÁFICOS -->
+  <div class="indices-section">
+    <h3 class="subsection-heading">📐 Índices Geomorfológicos, Hidrológicos y Edáficos del Terreno</h3>
+    <div class="indices-grid">
+      <!-- 1. TWI -->
+      <div class="index-card">
+        <div class="idx-head">
+          <span class="idx-tag">TWI · Humedad Topográfica</span>
+          <span class="idx-value highlight-hydro" id="idx-twi-val">--</span>
+        </div>
+        <div class="idx-bar-track">
+          <div class="idx-bar-fill" id="idx-twi-bar" style="width: 50%;"></div>
+        </div>
+        <p class="idx-desc" id="idx-twi-label">Calculando índice ln(As / tan β)...</p>
+      </div>
+
+      <!-- 2. TPI -->
+      <div class="index-card">
+        <div class="idx-head">
+          <span class="idx-tag">TPI · Posición en el Paisaje</span>
+          <span class="idx-value" id="idx-tpi-val">-- m</span>
+        </div>
+        <p class="idx-desc" id="idx-tpi-label">Diferencia altimétrica respecto al entorno vecinal...</p>
+        <div class="idx-submeta">
+          <span>Amplitud local (ΔH): <strong id="idx-amp-val">-- m</strong></span>
+        </div>
+      </div>
+
+      <!-- 3. Pendiente y Orientación (Aspect) -->
+      <div class="index-card">
+        <div class="idx-head">
+          <span class="idx-tag">Pendiente y Exposición (Aspect)</span>
+          <span class="idx-value" id="idx-slope-both">--%</span>
+        </div>
+        <p class="idx-desc" id="idx-aspect-label">Orientación dominante de la ladera...</p>
+        <div class="idx-submeta">
+          <span>Pendiente máx. local: <strong id="idx-max-slope">--%</strong></span>
+        </div>
+      </div>
+
+      <!-- 4. Factor LS Erosión Hídrica y Rugosidad TRI -->
+      <div class="index-card">
+        <div class="idx-head">
+          <span class="idx-tag">Erosión USLE (LS) y Rugosidad</span>
+          <span class="idx-value" id="idx-ls-val">--</span>
+        </div>
+        <p class="idx-desc" id="idx-erosion-label">Susceptibilidad a escorrentía y pérdida laminar...</p>
+        <div class="idx-submeta">
+          <span>Rugosidad TRI: <strong id="idx-tri-val">-- m</strong></span>
+        </div>
+      </div>
+
+      <!-- 5. Napa Freática y Red de Drenaje -->
+      <div class="index-card">
+        <div class="idx-head">
+          <span class="idx-tag">Napa Freática y Escurrimiento</span>
+          <span class="idx-value highlight-hydro" id="idx-wt-depth">-- m</span>
+        </div>
+        <p class="idx-desc" id="idx-drainage-net">Tipo de red hidrográfica y drenaje superficial...</p>
+        <div class="idx-submeta">
+          <span>Cota base freática: <strong id="idx-wt-msnm">-- msnm</strong></span>
+        </div>
+      </div>
+
+      <!-- 6. Taxonomía de Suelo INTA -->
+      <div class="index-card">
+        <div class="idx-head">
+          <span class="idx-tag">Taxonomía Edáfica Estimada (INTA)</span>
+          <span class="badge badge-agri" id="idx-inta-ip">IP --</span>
+        </div>
+        <p class="idx-desc" id="idx-soil-tax">Clasificación taxonómica y serie de referencia...</p>
+        <div class="idx-submeta">
+          <span>Capacidad de Uso: <strong id="idx-clase-uso">--</strong></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BLOQUE 3: ZONIFICACIÓN POR AMBIENTES PRODUCTIVOS -->
+  <div class="zones-section">
+    <div class="zones-header-row">
+      <h3 class="subsection-heading">🌱 Zonificación por Ambientes Productivos (Agricultura por Ambientes)</h3>
+      <span class="badge badge-jev" id="badge-precision-ag">Manejo por Ambientes</span>
+    </div>
+
+    <!-- Barra apilada de proporción de ambientes -->
+    <div class="zones-stacked-bar" id="zones-stacked-bar">
+      <div class="z-seg" style="width: 25%; background: #10b981;"></div>
+      <div class="z-seg" style="width: 25%; background: #3b82f6;"></div>
+      <div class="z-seg" style="width: 25%; background: #f59e0b;"></div>
+      <div class="z-seg" style="width: 25%; background: #ef4444;"></div>
+    </div>
+
+    <!-- Tarjetas de los 4 ambientes -->
+    <div class="zones-cards-grid" id="zones-cards-container">
+      <!-- Se puebla dinámicamente con los 4 ambientes del lote -->
+    </div>
+  </div>
+</section>
+
+<style>
+  .topo-study-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    padding: 20px 24px;
+    margin: 0 20px 18px 20px;
+    background: rgba(11, 17, 31, 0.86);
+  }
+
+  .topo-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    border-bottom: 1px solid var(--border-subtle);
+    padding-bottom: 14px;
+  }
+
+  .topo-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .topo-icon {
+    font-size: 1.5rem;
+    width: 42px;
+    height: 42px;
+    border-radius: 10px;
+    background: rgba(6, 182, 212, 0.14);
+    border: 1px solid rgba(6, 182, 212, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .topo-main-title {
+    font-family: var(--font-heading);
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #ffffff;
+  }
+
+  .topo-subtitle {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+
+  /* Bloque Perfil de Elevación */
+  .profile-section-card {
+    background: rgba(8, 12, 24, 0.75);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .profile-top-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .profile-tabs {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .profile-tab {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--text-muted);
+    padding: 5px 12px;
+    border-radius: 8px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-family: var(--font-body);
+  }
+
+  .profile-tab:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  .profile-tab.active {
+    background: rgba(6, 182, 212, 0.2);
+    border-color: var(--color-hydro);
+    color: var(--color-hydro-light);
+    box-shadow: 0 0 12px rgba(6, 182, 212, 0.2);
+  }
+
+  .profile-kpis {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+  }
+
+  .pkpi strong {
+    color: #ffffff;
+    font-family: var(--font-mono);
+  }
+
+  .profile-chart-wrapper {
+    position: relative;
+    width: 100%;
+    height: 225px;
+    background: rgba(5, 8, 17, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    overflow: hidden;
+    cursor: crosshair;
+  }
+
+  #topo-profile-svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  .profile-hover-tooltip {
+    position: absolute;
+    top: 12px;
+    left: 16px;
+    background: rgba(10, 15, 29, 0.94);
+    border: 1px solid rgba(6, 182, 212, 0.45);
+    border-radius: 8px;
+    padding: 8px 11px;
+    font-size: 0.72rem;
+    color: var(--text-main);
+    pointer-events: none;
+    z-index: 20;
+    min-width: 175px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+  }
+
+  .tt-title {
+    font-weight: 700;
+    color: var(--color-hydro-light);
+    margin-bottom: 4px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding-bottom: 3px;
+  }
+
+  .tt-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 2px;
+    color: var(--text-muted);
+  }
+
+  .tt-row strong {
+    color: #ffffff;
+    font-family: var(--font-mono);
+  }
+
+  .profile-legend-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+  }
+
+  .pleg-left {
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+  }
+
+  .pleg-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-muted);
+  }
+
+  .line-swatch {
+    width: 18px;
+    height: 3px;
+    border-radius: 2px;
+    display: inline-block;
+  }
+
+  .surface-swatch {
+    background: #10b981;
+  }
+
+  .watertable-swatch {
+    background: repeating-linear-gradient(to right, #38bdf8 0, #38bdf8 4px, transparent 4px, transparent 7px);
+  }
+
+  /* Bloque Índices Geomorfológicos */
+  .subsection-heading {
+    font-family: var(--font-heading);
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: #ffffff;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    margin-bottom: 10px;
+  }
+
+  .indices-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 12px;
+  }
+
+  .index-card {
+    background: rgba(10, 15, 29, 0.75);
+    border: 1px solid var(--border-subtle);
+    border-radius: 11px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .idx-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .idx-tag {
+    font-size: 0.73rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+  }
+
+  .idx-value {
+    font-family: var(--font-mono);
+    font-size: 0.98rem;
+    font-weight: 700;
+    color: #ffffff;
+  }
+
+  .highlight-hydro {
+    color: var(--color-hydro-light);
+  }
+
+  .idx-bar-track {
+    width: 100%;
+    height: 5px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .idx-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #10b981, #06b6d4, #3b82f6, #ef4444);
+    transition: width 0.5s ease;
+  }
+
+  .idx-desc {
+    font-size: 0.75rem;
+    color: var(--text-main);
+    line-height: 1.38;
+  }
+
+  .idx-submeta {
+    font-size: 0.71rem;
+    color: var(--text-dim);
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    padding-top: 5px;
+    margin-top: auto;
+  }
+
+  .idx-submeta strong {
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  /* Bloque Zonificación por Ambientes */
+  .zones-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .zones-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .zones-stacked-bar {
+    width: 100%;
+    height: 14px;
+    border-radius: 7px;
+    overflow: hidden;
+    display: flex;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .z-seg {
+    height: 100%;
+    transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .zones-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    margin-top: 4px;
+  }
+
+  :global(.zone-item-card) {
+    background: rgba(10, 15, 29, 0.78);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  :global(.zone-item-top) {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  :global(.zone-item-name) {
+    font-family: var(--font-heading);
+    font-size: 0.84rem;
+    font-weight: 700;
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  :global(.zone-item-pct) {
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    font-weight: 800;
+  }
+
+  :global(.zone-item-stats) {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  :global(.zone-item-desc) {
+    font-size: 0.73rem;
+    color: var(--text-dim);
+    line-height: 1.35;
+  }
+</style>
+

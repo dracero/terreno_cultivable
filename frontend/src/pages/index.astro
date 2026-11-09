@@ -4,14 +4,15 @@ import Header from '../components/Header.astro';
 import MapViewer from '../components/MapViewer.astro';
 import AgentMonitor from '../components/AgentMonitor.astro';
 import VerdictPanel from '../components/VerdictPanel.astro';
+import TopoStudyPanel from '../components/TopoStudyPanel.astro';
 ---
 
-<Layout title="AgroJEV PBA | Auditoría Hídrica y Terrenos Cultivables">
+<Layout title="AgroJEV PBA | Estudio Topográfico, Auditoría Hídrica y Terrenos Cultivables">
   <div class="dashboard-layout">
     <Header />
 
     <main class="dashboard-grid">
-      <!-- Columna Izquierda: Mapa Interactivo -->
+      <!-- Columna Izquierda: Mapa Topográfico e Hidrológico Interactivo -->
       <section class="grid-col map-column">
         <MapViewer />
       </section>
@@ -23,26 +24,43 @@ import VerdictPanel from '../components/VerdictPanel.astro';
       </section>
     </main>
 
+    <!-- Panel Integral de Estudio Topográfico, Perfil de Elevación, Índices (TWI/TPI/USLE) y Ambientes -->
+    <TopoStudyPanel />
+
     <footer class="main-footer">
       <div class="footer-content">
-        <span>AgroJEV PBA · Sistema Multiagente con JEV (TypeSafe System One) y Microsoft Planetary Computer STAC</span>
+        <span>AgroJEV PBA · Sistema Multiagente con JEV (TypeSafe System One), Modelado DEM Topográfico y Microsoft Planetary Computer STAC</span>
         <span class="footer-links">
-          <span>Provincia de Buenos Aires</span> · <span>Copernicus DEM 30m</span> · <span>JRC Global Surface Water</span>
+          <span>Provincia de Buenos Aires</span> · <span>Curvas de Nivel y Escurrimiento D8</span> · <span>Capacidad de Uso INTA</span>
         </span>
       </div>
     </footer>
   </div>
 </Layout>
 
-<!-- Script interactivo cliente (Leaflet + Conexión FastAPI) -->
+<!-- Script interactivo cliente (Leaflet + Motor Topográfico + Conexión FastAPI) -->
 <script is:inline src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script is:inline>
   document.addEventListener('DOMContentLoaded', () => {
     const API_BASE = 'http://localhost:8000';
     let map = null;
     let currentMarker = null;
+    let probeMarker = null;
+
+    // Capas STAC y Topográficas
     let jrcLayer = null;
     let demLayer = null;
+    let contourGroup = null;
+    let flowGroup = null;
+    let zonesGroup = null;
+    let transectGroup = null;
+
+    // Estado de datos actual
+    let lastAnalysisData = null;
+    let activeProfileId = 'north_south';
+    let customProfileObj = null;
+    let mapInteractionMode = 'audit'; // 'audit' | 'transect'
+    let transectStartLatLng = null;
 
     // Coordenadas iniciales: Chascomús (Cuenca del Salado)
     let selectedLat = -35.5765;
@@ -53,22 +71,48 @@ import VerdictPanel from '../components/VerdictPanel.astro';
     const inputLat = document.getElementById('input-lat');
     const inputLon = document.getElementById('input-lon');
     const inputName = document.getElementById('input-name');
+    const inputArea = document.getElementById('input-area');
     const btnAnalyze = document.getElementById('btn-analyze');
     const systemStatus = document.getElementById('system-status');
     const presetButtons = document.querySelectorAll('.preset-btn');
+    const mapHintBanner = document.getElementById('map-hint-banner');
+
+    // Checkboxes de capas
+    const layerContoursCheckbox = document.getElementById('layer-contours');
+    const layerFlowCheckbox = document.getElementById('layer-flow');
+    const layerZonesCheckbox = document.getElementById('layer-zones');
+    const layerTransectCheckbox = document.getElementById('layer-transect');
     const layerJrcCheckbox = document.getElementById('layer-jrc');
     const layerDemCheckbox = document.getElementById('layer-dem');
+
+    // Botones de modo de mapa
+    const modeAuditBtn = document.getElementById('mode-audit-btn');
+    const modeTransectBtn = document.getElementById('mode-transect-btn');
+
+    const ZONE_LABELS = {
+      loma_alta: "Loma Alta Bien Drenada",
+      media_loma: "Media Loma de Transición",
+      bajo_dulce: "Bajo Tendido / Dulce",
+      bajo_inundable: "Bajo Inundable / Cubeta"
+    };
+
+    const ZONE_COLORS = {
+      loma_alta: "#10b981",
+      media_loma: "#3b82f6",
+      bajo_dulce: "#f59e0b",
+      bajo_inundable: "#ef4444"
+    };
 
     // Inicializar Mapa Leaflet
     function initMap() {
       map = L.map('leaflet-map', {
         center: [selectedLat, selectedLon],
-        zoom: 11,
+        zoom: 14,
         zoomControl: true
       });
 
       // Capa base Satélite Esri
-      const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
         attribution: 'Tiles &copy; Esri, Maxar, Earthstar Geographics',
         maxZoom: 18
       }).addTo(map);
@@ -80,25 +124,66 @@ import VerdictPanel from '../components/VerdictPanel.astro';
         opacity: 0.7
       }).addTo(map);
 
-      // Marcador de parcela
+      // Grupos de capas topográficas locales
+      zonesGroup = L.layerGroup();
+      contourGroup = L.layerGroup().addTo(map);
+      flowGroup = L.layerGroup().addTo(map);
+      transectGroup = L.layerGroup().addTo(map);
+
+      // Marcador central de parcela
       const farmIcon = L.divIcon({
         className: 'custom-farm-pin',
-        html: `<div style="background:#10b981; width:22px; height:22px; border-radius:50%; border:3px solid #ffffff; box-shadow:0 0 14px #10b981;"></div>`,
-        iconSize: [22, 22],
-        iconAnchor: [11, 11]
+        html: `<div style="background:#10b981; width:20px; height:20px; border-radius:50%; border:3px solid #ffffff; box-shadow:0 0 14px #10b981;"></div>`,
+        iconSize: [20, 20],
+        iconAnchor: [10, 10]
       });
 
       currentMarker = L.marker([selectedLat, selectedLon], { icon: farmIcon }).addTo(map);
-      currentMarker.bindPopup(`<b>${selectedName}</b><br>Lat: ${selectedLat}<br>Lon: ${selectedLon}`).openPopup();
+      currentMarker.bindPopup(`<b>${selectedName}</b><br>Lat: ${selectedLat}<br>Lon: ${selectedLon}`);
 
-      // Click en el mapa para auditar cualquier punto
+      // Marcador sonda sincronizado con el gráfico de perfil de elevación
+      const probeIcon = L.divIcon({
+        className: 'custom-probe-pin',
+        html: `<div style="background:#38bdf8; width:14px; height:14px; border-radius:50%; border:2px solid #ffffff; box-shadow:0 0 12px #38bdf8;"></div>`,
+        iconSize: [14, 14],
+        iconAnchor: [7, 7]
+      });
+      probeMarker = L.marker([selectedLat, selectedLon], { icon: probeIcon, zIndexOffset: 1000 });
+
+      // Click en el mapa según el modo activo
       map.on('click', (e) => {
-        const lat = parseFloat(e.latlng.lat.toFixed(4));
-        const lon = parseFloat(e.latlng.lng.toFixed(4));
-        setCoordinates(lat, lon, `Lote (${lat}, ${lon})`);
+        const lat = parseFloat(e.latlng.lat.toFixed(5));
+        const lon = parseFloat(e.latlng.lng.toFixed(5));
+
+        if (mapInteractionMode === 'transect' && lastAnalysisData) {
+          handleTransectMapClick(lat, lon);
+        } else {
+          setCoordinates(lat, lon, `Lote (${lat.toFixed(4)}, ${lon.toFixed(4)})`);
+          runAnalysis();
+        }
       });
 
-      // Toggles de capas
+      // Toggles de capas topográficas y satelitales
+      layerContoursCheckbox?.addEventListener('change', (e) => {
+        if (e.target.checked) map.addLayer(contourGroup);
+        else map.removeLayer(contourGroup);
+      });
+
+      layerFlowCheckbox?.addEventListener('change', (e) => {
+        if (e.target.checked) map.addLayer(flowGroup);
+        else map.removeLayer(flowGroup);
+      });
+
+      layerZonesCheckbox?.addEventListener('change', (e) => {
+        if (e.target.checked) map.addLayer(zonesGroup);
+        else map.removeLayer(zonesGroup);
+      });
+
+      layerTransectCheckbox?.addEventListener('change', (e) => {
+        if (e.target.checked) map.addLayer(transectGroup);
+        else map.removeLayer(transectGroup);
+      });
+
       layerJrcCheckbox?.addEventListener('change', (e) => {
         if (jrcLayer) {
           if (e.target.checked) map.addLayer(jrcLayer);
@@ -114,6 +199,32 @@ import VerdictPanel from '../components/VerdictPanel.astro';
       });
     }
 
+    // Cambiar modo de clic en el mapa (Auditar vs Trazar Corte A -> B)
+    function setMapMode(mode) {
+      mapInteractionMode = mode;
+      transectStartLatLng = null;
+      if (mode === 'transect') {
+        modeTransectBtn?.classList.add('active');
+        modeAuditBtn?.classList.remove('active');
+        if (mapHintBanner) {
+          mapHintBanner.innerHTML = '📏 <b>Modo Corte Topográfico:</b> Haz click en el <b>Punto A</b> de inicio sobre la grilla del lote';
+          mapHintBanner.style.borderColor = '#38bdf8';
+          mapHintBanner.style.color = '#e0f2fe';
+        }
+      } else {
+        modeAuditBtn?.classList.add('active');
+        modeTransectBtn?.classList.remove('active');
+        if (mapHintBanner) {
+          mapHintBanner.innerHTML = '📍 <b>Modo Auditoría:</b> Haz click en cualquier punto del mapa para analizar su topografía y riesgo hídrico';
+          mapHintBanner.style.borderColor = 'rgba(255, 255, 255, 0.12)';
+          mapHintBanner.style.color = 'var(--text-muted)';
+        }
+      }
+    }
+
+    modeAuditBtn?.addEventListener('click', () => setMapMode('audit'));
+    modeTransectBtn?.addEventListener('click', () => setMapMode('transect'));
+
     function setCoordinates(lat, lon, name) {
       selectedLat = lat;
       selectedLon = lon;
@@ -125,8 +236,120 @@ import VerdictPanel from '../components/VerdictPanel.astro';
 
       if (currentMarker && map) {
         currentMarker.setLatLng([lat, lon]);
-        currentMarker.setPopupContent(`<b>${selectedName}</b><br>Lat: ${lat}<br>Lon: ${lon}`).openPopup();
-        map.flyTo([lat, lon], 12, { duration: 1.2 });
+        currentMarker.setPopupContent(`<b>${selectedName}</b><br>Lat: ${lat}<br>Lon: ${lon}`);
+        map.flyTo([lat, lon], 14, { duration: 1.1 });
+      }
+    }
+
+    // Interpolación bilineal sobre la grilla DEM para cualquier par (lat, lon)
+    function sampleDemGrid(topo, lat, lon) {
+      const lats = topo.grid_lats;
+      const lons = topo.grid_lons;
+      const zGrid = topo.elevation_grid;
+      const rows = lats.length;
+      const cols = lons.length;
+
+      const minLat = lats[0], maxLat = lats[rows - 1];
+      const minLon = lons[0], maxLon = lons[cols - 1];
+
+      const u = Math.max(0, Math.min(rows - 1.001, ((lat - minLat) / Math.max(1e-6, maxLat - minLat)) * (rows - 1)));
+      const v = Math.max(0, Math.min(cols - 1.001, ((lon - minLon) / Math.max(1e-6, maxLon - minLon)) * (cols - 1)));
+
+      const r0 = Math.floor(u), c0 = Math.floor(v);
+      const r1 = Math.min(rows - 1, r0 + 1), c1 = Math.min(cols - 1, c0 + 1);
+      const du = u - r0, dv = v - c0;
+
+      const z = (1 - du) * (1 - dv) * zGrid[r0][c0] +
+                (1 - du) * dv * zGrid[r0][c1] +
+                du * (1 - dv) * zGrid[r1][c0] +
+                du * dv * zGrid[r1][c1];
+
+      const nearR = Math.round(u), nearC = Math.round(v);
+      const zoneId = topo.zone_grid[nearR]?.[nearC] || 'media_loma';
+      return { elevation_m: parseFloat(z.toFixed(2)), zone_id: zoneId };
+    }
+
+    // Gestionar trazado de transecta personalizada A -> B en el mapa
+    function handleTransectMapClick(lat, lon) {
+      const topo = lastAnalysisData?.geospatial?.topography;
+      if (!topo) return;
+
+      if (!transectStartLatLng) {
+        transectStartLatLng = { lat, lon };
+        if (mapHintBanner) {
+          mapHintBanner.innerHTML = `📏 Punto A fijado (${lat.toFixed(4)}, ${lon.toFixed(4)}). Ahora haz click en el <b>Punto B</b> para generar el corte.`;
+        }
+      } else {
+        const ptA = transectStartLatLng;
+        const ptB = { lat, lon };
+        transectStartLatLng = null;
+
+        // Construir perfil interpolado de 25 muestras entre A y B
+        const numSamples = 25;
+        const points = [];
+        let cumDist = 0;
+        let prevLat = null, prevLon = null, prevZ = null;
+        let maxLocalSlope = 0;
+
+        const zFlat = topo.elevation_grid.flat();
+        const zMean = zFlat.reduce((a, b) => a + b, 0) / zFlat.length;
+
+        for (let i = 0; i < numSamples; i++) {
+          const t = i / (numSamples - 1);
+          const pLat = parseFloat((ptA.lat + t * (ptB.lat - ptA.lat)).toFixed(6));
+          const pLon = parseFloat((ptA.lon + t * (ptB.lon - ptA.lon)).toFixed(6));
+          const sampled = sampleDemGrid(topo, pLat, pLon);
+          const wtMsnm = parseFloat((topo.water_table_base_msnm + (sampled.elevation_m - zMean) * 0.35).toFixed(2));
+          const wtDepth = parseFloat(Math.max(0, sampled.elevation_m - wtMsnm).toFixed(2));
+
+          let localSlope = 0;
+          if (prevLat !== null) {
+            const dM = Math.hypot((pLat - prevLat) * 111000, (pLon - prevLon) * 111000 * Math.cos(pLat * Math.PI / 180));
+            cumDist += dM;
+            localSlope = parseFloat((Math.abs(sampled.elevation_m - prevZ) / Math.max(1, dM) * 100).toFixed(2));
+            maxLocalSlope = Math.max(maxLocalSlope, localSlope);
+          }
+
+          points.push({
+            distance_m: parseFloat(cumDist.toFixed(1)),
+            lat: pLat,
+            lon: pLon,
+            elevation_m: sampled.elevation_m,
+            water_table_msnm: wtMsnm,
+            water_table_depth_m: wtDepth,
+            slope_local_pct: localSlope,
+            zone_id: sampled.zone_id
+          });
+
+          prevLat = pLat; prevLon = pLon; prevZ = sampled.elevation_m;
+        }
+
+        const elevs = points.map(p => p.elevation_m);
+        const minZ = Math.min(...elevs);
+        const maxZ = Math.max(...elevs);
+        customProfileObj = {
+          profile_id: 'custom_ab',
+          title: 'Corte Personalizado A → B',
+          total_distance_m: parseFloat(cumDist.toFixed(1)),
+          min_elevation_m: minZ,
+          max_elevation_m: maxZ,
+          relief_delta_m: parseFloat((maxZ - minZ).toFixed(2)),
+          avg_slope_pct: parseFloat(((maxZ - minZ) / Math.max(1, cumDist) * 100).toFixed(2)),
+          max_slope_pct: maxLocalSlope,
+          points
+        };
+
+        // Activar pestaña de corte libre y renderizar
+        activeProfileId = 'custom_ab';
+        document.querySelectorAll('.profile-tab').forEach(b => {
+          b.classList.toggle('active', b.dataset.profile === 'custom_ab');
+        });
+        renderElevationProfile(customProfileObj);
+        drawActiveTransectOnMap(customProfileObj);
+
+        if (mapHintBanner) {
+          mapHintBanner.innerHTML = '✅ Corte A → B generado abajo. Puedes hacer click nuevamente para trazar otro corte o volver a Modo Auditoría.';
+        }
       }
     }
 
@@ -138,7 +361,7 @@ import VerdictPanel from '../components/VerdictPanel.astro';
         if (layer.name === 'jrc_water_occurrence') {
           if (jrcLayer) map.removeLayer(jrcLayer);
           jrcLayer = L.tileLayer(layer.tile_url, {
-            opacity: 0.65,
+            opacity: 0.6,
             attribution: layer.attribution,
             maxZoom: 18
           });
@@ -155,12 +378,447 @@ import VerdictPanel from '../components/VerdictPanel.astro';
       });
     }
 
+    // Dibujar Curvas de Nivel (Isolíneas), Vectores de Escurrimiento D8 y Mapa de Ambientes en Leaflet
+    function renderTopographicMapOverlays(topo) {
+      if (!map || !topo) return;
+
+      contourGroup.clearLayers();
+      flowGroup.clearLayers();
+      zonesGroup.clearLayers();
+
+      const lats = topo.grid_lats;
+      const lons = topo.grid_lons;
+      const zMin = topo.geomorphology.min_elevation_m;
+      const zMax = topo.geomorphology.max_elevation_m;
+      const zSpan = Math.max(0.5, zMax - zMin);
+
+      // 1. Rectángulos de Zonificación por Ambientes Productivos
+      const dLatHalf = (lats[1] - lats[0]) * 0.5;
+      const dLonHalf = (lons[1] - lons[0]) * 0.5;
+
+      for (let r = 0; r < lats.length; r++) {
+        for (let c = 0; c < lons.length; c++) {
+          const zVal = topo.elevation_grid[r][c];
+          const zKey = topo.zone_grid[r][c];
+          const color = ZONE_COLORS[zKey] || '#3b82f6';
+          const bounds = [
+            [lats[r] - dLatHalf, lons[c] - dLonHalf],
+            [lats[r] + dLatHalf, lons[c] + dLonHalf]
+          ];
+          const rect = L.rectangle(bounds, {
+            color: color,
+            weight: 0.4,
+            fillColor: color,
+            fillOpacity: 0.35
+          });
+          rect.bindTooltip(
+            `<b>${ZONE_LABELS[zKey]}</b><br>Cota: ${zVal} msnm`,
+            { sticky: true, direction: 'top' }
+          );
+          zonesGroup.addLayer(rect);
+        }
+      }
+
+      // 2. Curvas de Nivel (Isolíneas Marching Squares)
+      topo.contours.forEach(contour => {
+        const norm = (contour.elevation_m - zMin) / zSpan;
+        // Paleta topográfica de bajo (cian/ámbar) a loma alta (esmeralda/dorado)
+        const strokeColor = norm > 0.72 ? '#34d399' : (norm > 0.42 ? '#fbbf24' : '#38bdf8');
+        const weight = contour.is_major ? 2.4 : 1.3;
+        const dashArray = contour.is_major ? null : '4, 3';
+
+        contour.polylines.forEach((polyCoords) => {
+          const line = L.polyline(polyCoords, {
+            color: strokeColor,
+            weight: weight,
+            opacity: contour.is_major ? 0.92 : 0.72,
+            dashArray: dashArray,
+            smoothFactor: 1.2
+          });
+          line.bindTooltip(`Curva de nivel: <b>${contour.elevation_m} msnm</b>`, { sticky: true });
+          contourGroup.addLayer(line);
+
+          // Etiqueta de cota sobre curvas maestras
+          if (contour.is_major && polyCoords.length >= 4) {
+            const midPt = polyCoords[Math.floor(polyCoords.length / 2)];
+            const labelIcon = L.divIcon({
+              className: 'contour-label-badge',
+              html: `<span style="background:rgba(7,10,18,0.86); color:${strokeColor}; border:1px solid ${strokeColor}; padding:1px 5px; border-radius:4px; font-size:10px; font-family:monospace; font-weight:700; white-space:nowrap;">${contour.elevation_m}m</span>`,
+              iconSize: [44, 16],
+              iconAnchor: [22, 8]
+            });
+            contourGroup.addLayer(L.marker(midPt, { icon: labelIcon, interactive: false }));
+          }
+        });
+      });
+
+      // 3. Vectores de Escurrimiento Superficial D8 (con puntas de flecha orientadas)
+      topo.flow_vectors.forEach(vec => {
+        const isChannel = vec.is_drainage_channel;
+        const vecColor = isChannel ? '#38bdf8' : '#a7f3d0';
+        const weight = isChannel ? 2.2 : 1.4;
+
+        // Línea principal del vector
+        const shaft = L.polyline(
+          [[vec.lat, vec.lon], [vec.target_lat, vec.target_lon]],
+          { color: vecColor, weight: weight, opacity: isChannel ? 0.92 : 0.68 }
+        );
+
+        // Calcular aletas de la punta de flecha
+        const dx = vec.target_lon - vec.lon;
+        const dy = vec.target_lat - vec.lat;
+        const angle = Math.atan2(dy, dx);
+        const headLen = Math.hypot(dx, dy) * 0.35;
+        const wing1 = [
+          vec.target_lat - headLen * Math.sin(angle - Math.PI / 6),
+          vec.target_lon - headLen * Math.cos(angle - Math.PI / 6)
+        ];
+        const wing2 = [
+          vec.target_lat - headLen * Math.sin(angle + Math.PI / 6),
+          vec.target_lon - headLen * Math.cos(angle + Math.PI / 6)
+        ];
+        const arrowHead = L.polyline(
+          [wing1, [vec.target_lat, vec.target_lon], wing2],
+          { color: vecColor, weight: weight, opacity: isChannel ? 0.95 : 0.75 }
+        );
+
+        const tipText = isChannel
+          ? `<b>Vía de Escurrimiento / Cañada</b><br>Dirección: ${vec.azimuth_deg}° | Pendiente: ${vec.slope_pct}%<br>Celdas aportantes: ${vec.flow_accumulation}`
+          : `<b>Flujo laminar D8</b><br>Dirección: ${vec.azimuth_deg}° | Pendiente: ${vec.slope_pct}%`;
+
+        shaft.bindTooltip(tipText);
+        flowGroup.addLayer(shaft);
+        flowGroup.addLayer(arrowHead);
+      });
+
+      // Marco perimetral del área de estudio DEM
+      const bboxBounds = [
+        [lats[0], lons[0]],
+        [lats[lats.length - 1], lons[lons.length - 1]]
+      ];
+      L.rectangle(bboxBounds, {
+        color: 'rgba(56, 189, 248, 0.45)',
+        weight: 1.2,
+        dashArray: '6, 4',
+        fill: false,
+        interactive: false
+      }).addTo(contourGroup);
+    }
+
+    // Dibujar en el mapa la línea de la transecta/corte actualmente seleccionada (A -> B)
+    function drawActiveTransectOnMap(profile) {
+      if (!transectGroup || !profile || !profile.points || profile.points.length < 2) return;
+      transectGroup.clearLayers();
+
+      const coords = profile.points.map(p => [p.lat, p.lon]);
+      const startPt = coords[0];
+      const endPt = coords[coords.length - 1];
+
+      const transectLine = L.polyline(coords, {
+        color: '#f43f5e',
+        weight: 3,
+        dashArray: '8, 5',
+        opacity: 0.95
+      });
+      transectLine.bindTooltip(`<b>${profile.title}</b> (${profile.total_distance_m} m)`);
+      transectGroup.addLayer(transectLine);
+
+      const badgeA = L.divIcon({
+        className: 'transect-endpoint',
+        html: `<div style="background:#f43f5e; color:#fff; font-weight:800; font-size:10px; width:18px; height:18px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:2px solid #fff;">A</div>`,
+        iconSize: [18, 18],
+        iconAnchor: [9, 9]
+      });
+      const badgeB = L.divIcon({
+        className: 'transect-endpoint',
+        html: `<div style="background:#f43f5e; color:#fff; font-weight:800; font-size:10px; width:18px; height:18px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:2px solid #fff;">B</div>`,
+        iconSize: [18, 18],
+        iconAnchor: [9, 9]
+      });
+
+      transectGroup.addLayer(L.marker(startPt, { icon: badgeA, interactive: false }));
+      transectGroup.addLayer(L.marker(endPt, { icon: badgeB, interactive: false }));
+    }
+
+    // Renderizar el gráfico SVG interactivo del Perfil de Elevación / Corte Topográfico
+    function renderElevationProfile(profile) {
+      const svg = document.getElementById('topo-profile-svg');
+      const tooltip = document.getElementById('profile-tooltip');
+      if (!svg || !profile || !profile.points || profile.points.length === 0) return;
+
+      // Actualizar KPIs superiores del perfil
+      document.getElementById('prof-min-z').textContent = `${profile.min_elevation_m} m`;
+      document.getElementById('prof-max-z').textContent = `${profile.max_elevation_m} m`;
+      document.getElementById('prof-delta-z').textContent = `${profile.relief_delta_m} m`;
+      document.getElementById('prof-avg-slope').textContent = `${profile.avg_slope_pct}%`;
+      document.getElementById('prof-dist').textContent = `${Math.round(profile.total_distance_m)} m`;
+
+      const pts = profile.points;
+      const W = 860, H = 230;
+      const padL = 54, padR = 24, padT = 22, padB = 32;
+      const plotW = W - padL - padR;
+      const plotH = H - padT - padB;
+
+      const allZ = pts.flatMap(p => [p.elevation_m, p.water_table_msnm]);
+      const minY = Math.min(...allZ) - Math.max(0.3, profile.relief_delta_m * 0.15);
+      const maxY = Math.max(...allZ) + Math.max(0.3, profile.relief_delta_m * 0.15);
+      const maxDist = Math.max(1, profile.total_distance_m);
+
+      const xOf = (d) => padL + (d / maxDist) * plotW;
+      const yOf = (z) => padT + plotH - ((z - minY) / Math.max(0.1, maxY - minY)) * plotH;
+
+      // Líneas de grilla horizontal
+      let gridHtml = '';
+      const stepsY = 4;
+      for (let i = 0; i <= stepsY; i++) {
+        const valZ = minY + (i / stepsY) * (maxY - minY);
+        const py = yOf(valZ);
+        gridHtml += `<line x1="${padL}" y1="${py}" x2="${W - padR}" y2="${py}" stroke="rgba(255,255,255,0.07)" stroke-dasharray="3,3" />`;
+        gridHtml += `<text x="${padL - 8}" y="${py + 4}" text-anchor="end" fill="#94a3b8" font-size="10.5" font-family="monospace">${valZ.toFixed(1)}m</text>`;
+      }
+
+      // Etiquetas de distancia en el eje X
+      const stepsX = 5;
+      for (let i = 0; i <= stepsX; i++) {
+        const dVal = (i / stepsX) * maxDist;
+        const px = xOf(dVal);
+        gridHtml += `<line x1="${px}" y1="${padT}" x2="${px}" y2="${padT + plotH}" stroke="rgba(255,255,255,0.04)" />`;
+        gridHtml += `<text x="${px}" y="${H - 9}" text-anchor="middle" fill="#64748b" font-size="10.5" font-family="monospace">${Math.round(dVal)}m</text>`;
+      }
+
+      // Etiquetas de extremos A y B
+      gridHtml += `<text x="${padL + 6}" y="${padT + 12}" fill="#f43f5e" font-size="11" font-weight="bold">A</text>`;
+      gridHtml += `<text x="${W - padR - 14}" y="${padT + 12}" fill="#f43f5e" font-size="11" font-weight="bold">B</text>`;
+
+      // Polígono sombreado bajo la napa freática
+      const wtCoords = pts.map(p => `${xOf(p.distance_m).toFixed(1)},${yOf(p.water_table_msnm).toFixed(1)}`).join(' ');
+      const wtAreaPoints = `${xOf(0).toFixed(1)},${padT + plotH} ${wtCoords} ${xOf(maxDist).toFixed(1)},${padT + plotH}`;
+
+      // Polígono sombreado del perfil del terreno
+      const surfCoords = pts.map(p => `${xOf(p.distance_m).toFixed(1)},${yOf(p.elevation_m).toFixed(1)}`).join(' ');
+      const surfAreaPoints = `${xOf(0).toFixed(1)},${padT + plotH} ${surfCoords} ${xOf(maxDist).toFixed(1)},${padT + plotH}`;
+
+      // Segmentos coloreados por ambiente sobre la superficie
+      let coloredSegmentsHtml = '';
+      for (let i = 0; i < pts.length - 1; i++) {
+        const p0 = pts[i], p1 = pts[i + 1];
+        const segColor = ZONE_COLORS[p0.zone_id] || '#10b981';
+        coloredSegmentsHtml += `<line x1="${xOf(p0.distance_m).toFixed(1)}" y1="${yOf(p0.elevation_m).toFixed(1)}" x2="${xOf(p1.distance_m).toFixed(1)}" y2="${yOf(p1.elevation_m).toFixed(1)}" stroke="${segColor}" stroke-width="3.2" stroke-linecap="round" />`;
+      }
+
+      // Puntos de muestreo sobre la curva
+      const dotsHtml = pts.map((p, idx) => {
+        const c = ZONE_COLORS[p.zone_id] || '#10b981';
+        return `<circle cx="${xOf(p.distance_m).toFixed(1)}" cy="${yOf(p.elevation_m).toFixed(1)}" r="3.2" fill="${c}" stroke="#070a12" stroke-width="1.2" data-idx="${idx}" />`;
+      }).join('');
+
+      svg.innerHTML = `
+        <defs>
+          <linearGradient id="gradTerrainFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#10b981" stop-opacity="0.30" />
+            <stop offset="100%" stop-color="#10b981" stop-opacity="0.03" />
+          </linearGradient>
+          <linearGradient id="gradWaterTable" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.24" />
+            <stop offset="100%" stop-color="#06b6d4" stop-opacity="0.04" />
+          </linearGradient>
+        </defs>
+        ${gridHtml}
+        <polygon points="${surfAreaPoints}" fill="url(#gradTerrainFill)" />
+        <polygon points="${wtAreaPoints}" fill="url(#gradWaterTable)" />
+        <polyline points="${wtCoords}" fill="none" stroke="#38bdf8" stroke-width="2" stroke-dasharray="6,4" />
+        ${coloredSegmentsHtml}
+        ${dotsHtml}
+        <line id="svg-hover-vline" x1="0" y1="${padT}" x2="0" y2="${padT + plotH}" stroke="#ffffff" stroke-width="1.2" stroke-dasharray="3,3" visibility="hidden" />
+        <circle id="svg-hover-dot" cx="0" cy="0" r="5.5" fill="#ffffff" stroke="#06b6d4" stroke-width="2.5" visibility="hidden" />
+      `;
+
+      const vline = document.getElementById('svg-hover-vline');
+      const hdot = document.getElementById('svg-hover-dot');
+      const chartBox = document.getElementById('profile-chart-box');
+
+      chartBox.onmousemove = (ev) => {
+        const rect = chartBox.getBoundingClientRect();
+        const relX = ((ev.clientX - rect.left) / rect.width) * W;
+        const clampedX = Math.max(padL, Math.min(W - padR, relX));
+        const targetDist = ((clampedX - padL) / plotW) * maxDist;
+
+        // Buscar el punto más cercano del perfil
+        let bestPt = pts[0];
+        let minDiff = Infinity;
+        for (const p of pts) {
+          const diff = Math.abs(p.distance_m - targetDist);
+          if (diff < minDiff) {
+            minDiff = diff;
+            bestPt = p;
+          }
+        }
+
+        const px = xOf(bestPt.distance_m);
+        const py = yOf(bestPt.elevation_m);
+        vline?.setAttribute('x1', px);
+        vline?.setAttribute('x2', px);
+        vline?.setAttribute('visibility', 'visible');
+
+        hdot?.setAttribute('cx', px);
+        hdot?.setAttribute('cy', py);
+        hdot?.setAttribute('visibility', 'visible');
+
+        if (tooltip) {
+          tooltip.style.display = 'block';
+          const leftPx = Math.min(rect.width - 195, Math.max(12, (px / W) * rect.width + 14));
+          tooltip.style.left = `${leftPx}px`;
+          document.getElementById('tt-zone').textContent = ZONE_LABELS[bestPt.zone_id] || bestPt.zone_id;
+          document.getElementById('tt-zone').style.color = ZONE_COLORS[bestPt.zone_id] || '#38bdf8';
+          document.getElementById('tt-dist').textContent = `${bestPt.distance_m} m`;
+          document.getElementById('tt-elev').textContent = `${bestPt.elevation_m} msnm`;
+          document.getElementById('tt-napa').textContent = `${bestPt.water_table_depth_m} m (${bestPt.water_table_msnm} msnm)`;
+          document.getElementById('tt-slope').textContent = `${bestPt.slope_local_pct}%`;
+        }
+
+        // Sincronizar marcador sonda en el mapa Leaflet
+        if (probeMarker && map) {
+          probeMarker.setLatLng([bestPt.lat, bestPt.lon]);
+          if (!map.hasLayer(probeMarker)) probeMarker.addTo(map);
+        }
+      };
+
+      chartBox.onmouseleave = () => {
+        vline?.setAttribute('visibility', 'hidden');
+        hdot?.setAttribute('visibility', 'hidden');
+        if (tooltip) tooltip.style.display = 'none';
+        if (probeMarker && map && map.hasLayer(probeMarker)) {
+          map.removeLayer(probeMarker);
+        }
+      };
+    }
+
+    // Actualizar panel de Índices Geomorfológicos y Zonificación por Ambientes
+    function updateTopoStudySection(data) {
+      const topo = data.geospatial.topography;
+      const geom = topo.geomorphology;
+      const verdict = data.verdict;
+
+      // Resumen rápido sobre la barra del mapa
+      document.getElementById('stat-contour-int').textContent = `${geom.contour_interval_m} m`;
+      document.getElementById('stat-relief-amp').textContent = `${geom.relief_amplitude_m} m`;
+      document.getElementById('stat-slope-pct').textContent = `${geom.slope_pct}%`;
+
+      document.getElementById('topo-region-subtitle').textContent =
+        `${geom.region_geomorphology} · Red ${geom.drainage_network_type}`;
+
+      // 1. TWI
+      document.getElementById('idx-twi-val').textContent = geom.twi_value;
+      const twiPct = Math.max(8, Math.min(100, ((geom.twi_value - 6) / 12) * 100));
+      document.getElementById('idx-twi-bar').style.width = `${twiPct}%`;
+      document.getElementById('idx-twi-label').textContent = geom.twi_label;
+
+      // 2. TPI
+      const tpiSign = geom.tpi_value_m > 0 ? `+${geom.tpi_value_m}` : `${geom.tpi_value_m}`;
+      document.getElementById('idx-tpi-val').textContent = `${tpiSign} m`;
+      document.getElementById('idx-tpi-label').textContent = geom.tpi_label;
+      document.getElementById('idx-amp-val').textContent = `${geom.relief_amplitude_m} m (${geom.min_elevation_m}–${geom.max_elevation_m} msnm)`;
+
+      // 3. Pendiente y Orientación (Aspect)
+      document.getElementById('idx-slope-both').textContent = `${geom.slope_pct}% (${data.geospatial.slope_deg}°)`;
+      document.getElementById('idx-aspect-label').textContent = `Orientación ${geom.aspect_deg}° · ${geom.aspect_cardinal}`;
+      document.getElementById('idx-max-slope').textContent = `${geom.max_slope_pct}%`;
+
+      // 4. Erosión USLE (LS) y Rugosidad TRI
+      document.getElementById('idx-ls-val').textContent = `LS = ${geom.ls_erosion_factor}`;
+      document.getElementById('idx-erosion-label').textContent = geom.erosion_risk_label;
+      document.getElementById('idx-tri-val').textContent = `${geom.tri_rugosity_m} m`;
+
+      // 5. Napa Freática y Red de Drenaje
+      document.getElementById('idx-wt-depth').textContent = `${geom.estimated_water_table_depth_m} m`;
+      document.getElementById('idx-drainage-net').textContent = geom.drainage_network_type;
+      document.getElementById('idx-wt-msnm').textContent = `${topo.water_table_base_msnm} msnm`;
+
+      // 6. Taxonomía de Suelo INTA
+      document.getElementById('idx-inta-ip').textContent = `IP ${verdict.indice_productividad_ip}/100`;
+      document.getElementById('idx-soil-tax').textContent = geom.soil_taxonomy_inta;
+      document.getElementById('idx-clase-uso').textContent = `${verdict.clase_capacidad_uso_label} (${verdict.limitante_edafica_label})`;
+
+      // Zonificación por Ambientes Productivos
+      const precisionBadge = document.getElementById('badge-precision-ag');
+      if (precisionBadge) {
+        const probPct = Math.round(verdict.manejo_por_ambientes_prob * 100);
+        precisionBadge.textContent = verdict.manejo_por_ambientes_recomendado
+          ? `JEV: Agricultura por Ambientes Recomendada (${probPct}%)`
+          : `JEV: Lote Homogéneo (${probPct}% variabilidad)`;
+      }
+
+      const stackedBar = document.getElementById('zones-stacked-bar');
+      if (stackedBar) {
+        stackedBar.innerHTML = topo.terrain_zones.map(z =>
+          `<div class="z-seg" style="width:${z.percentage}%; background:${z.color_hex};" title="${z.zone_name}: ${z.percentage}% (${z.area_ha} ha)"></div>`
+        ).join('');
+      }
+
+      const zonesContainer = document.getElementById('zones-cards-container');
+      if (zonesContainer) {
+        zonesContainer.innerHTML = topo.terrain_zones.map(z => `
+          <div class="zone-item-card" style="border-left: 3px solid ${z.color_hex};">
+            <div class="zone-item-top">
+              <span class="zone-item-name">
+                <span style="width:8px; height:8px; border-radius:50%; background:${z.color_hex}; display:inline-block;"></span>
+                ${z.zone_name}
+              </span>
+              <span class="zone-item-pct" style="color:${z.color_hex};">${z.percentage}%</span>
+            </div>
+            <div class="zone-item-stats">
+              <span>Sup: <b>${z.area_ha} ha</b></span>
+              <span>Cota media: <b>${z.mean_elevation_m} m</b></span>
+            </div>
+            <p class="zone-item-desc">${z.agronomic_use}</p>
+          </div>
+        `).join('');
+      }
+
+      // Renderizar perfil activo y su traza en el mapa
+      let profileToDraw = topo.elevation_profiles.find(p => p.profile_id === activeProfileId);
+      if (!profileToDraw) {
+        activeProfileId = 'north_south';
+        profileToDraw = topo.elevation_profiles[0];
+        document.querySelectorAll('.profile-tab').forEach(b => {
+          b.classList.toggle('active', b.dataset.profile === 'north_south');
+        });
+      }
+      renderElevationProfile(profileToDraw);
+      drawActiveTransectOnMap(profileToDraw);
+    }
+
+    // Pestañas de selección de perfil de elevación
+    document.querySelectorAll('.profile-tab').forEach(tabBtn => {
+      tabBtn.addEventListener('click', () => {
+        const targetId = tabBtn.dataset.profile;
+        if (targetId === 'custom_ab' && !customProfileObj) {
+          setMapMode('transect');
+          alert('Modo Corte A → B activado: Haz click en dos puntos (A y B) sobre el mapa para trazar tu corte personalizado.');
+          return;
+        }
+        document.querySelectorAll('.profile-tab').forEach(b => b.classList.remove('active'));
+        tabBtn.classList.add('active');
+        activeProfileId = targetId;
+
+        if (targetId === 'custom_ab' && customProfileObj) {
+          renderElevationProfile(customProfileObj);
+          drawActiveTransectOnMap(customProfileObj);
+        } else if (lastAnalysisData) {
+          const prof = lastAnalysisData.geospatial.topography.elevation_profiles.find(p => p.profile_id === targetId);
+          if (prof) {
+            renderElevationProfile(prof);
+            drawActiveTransectOnMap(prof);
+          }
+        }
+      });
+    });
+
     // Comprobar estado del backend
     async function checkBackendHealth() {
       try {
         const res = await fetch(`${API_BASE}/api/health`);
         if (res.ok) {
-          const data = await res.json();
           if (systemStatus) {
             systemStatus.innerHTML = `<span class="status-dot"></span><span>JEV Backend Conectado</span>`;
           }
@@ -172,21 +830,21 @@ import VerdictPanel from '../components/VerdictPanel.astro';
       }
     }
 
-    // Ejecutar Pipeline Multiagente
+    // Ejecutar Pipeline Multiagente + Motor Topográfico
     async function runAnalysis() {
       const lat = parseFloat(inputLat.value);
       const lon = parseFloat(inputLon.value);
       const name = inputName.value.trim() || "Lote Rural";
+      const areaHa = parseFloat(inputArea?.value || "120") || 120.0;
 
       btnAnalyze.disabled = true;
-      btnAnalyze.innerHTML = `<span class="spinning">⏳</span><span>Procesando 3 Agentes JEV...</span>`;
+      btnAnalyze.innerHTML = `<span class="spinning">⏳</span><span>Procesando Topografía y JEV...</span>`;
 
-      // Estados visuales de los agentes en ejecución
       const status1 = document.getElementById('status-agent-1');
       const status2 = document.getElementById('status-agent-2');
       const status3 = document.getElementById('status-agent-3');
 
-      status1.className = "status-pill status-running"; status1.textContent = "Extrayendo STAC...";
+      status1.className = "status-pill status-running"; status1.textContent = "Modelando DEM...";
       status2.className = "status-pill status-ready"; status2.textContent = "En cola";
       status3.className = "status-pill status-ready"; status3.textContent = "En cola";
 
@@ -194,19 +852,24 @@ import VerdictPanel from '../components/VerdictPanel.astro';
         const res = await fetch(`${API_BASE}/api/analyze`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ lat, lon, parcel_name: name })
+          body: JSON.stringify({ lat, lon, parcel_name: name, area_ha: areaHa })
         });
 
         if (!res.ok) throw new Error("Error en el servidor al evaluar");
         const data = await res.json();
+        lastAnalysisData = data;
+        customProfileObj = null;
+        if (activeProfileId === 'custom_ab') activeProfileId = 'north_south';
 
-        // Actualizar capas de mapa con teselas STAC de Planetary
+        // Actualizar capas de mapa con teselas STAC + Curvas de Nivel + Vectores D8
         updateStacTileLayers(data.geospatial.tile_layers);
+        renderTopographicMapOverlays(data.geospatial.topography);
+        updateTopoStudySection(data);
 
         // Agente 1 Completado
         status1.className = "status-pill status-done"; status1.textContent = "Completado";
-        document.getElementById('val-cota').textContent = `${data.geospatial.elevation_m} m`;
-        document.getElementById('val-slope').textContent = `${data.geospatial.slope_deg}°`;
+        document.getElementById('val-cota').textContent = `${data.geospatial.elevation_m} m (Δ ${data.geospatial.topography.geomorphology.relief_amplitude_m}m)`;
+        document.getElementById('val-slope').textContent = `${data.geospatial.slope_deg}° (${data.geospatial.slope_pct}%)`;
         document.getElementById('val-jrc-pct').textContent = `${data.geospatial.jrc_occurrence_pct}%`;
         document.getElementById('val-sar').textContent = `${data.geospatial.sar_backscatter_db} dB`;
 
@@ -219,9 +882,11 @@ import VerdictPanel from '../components/VerdictPanel.astro';
         document.getElementById('val-mecanismo').textContent = data.hydro_risk.mecanismo_hidrico_label;
         document.getElementById('val-hydro-conf').textContent = `${(data.hydro_risk.confidence * 100).toFixed(0)}%`;
 
-        // Agente 3 Completado (JEV Dictamen Agronómico)
+        // Agente 3 Completado (JEV Dictamen Agronómico + INTA)
         status3.className = "status-pill status-done"; status3.textContent = "JEV Dictamen";
         document.getElementById('val-aptitud-tag').textContent = data.verdict.aptitud_productiva_label;
+        document.getElementById('val-clase-inta').textContent = data.verdict.clase_capacidad_uso_label;
+        document.getElementById('val-limitante-inta').textContent = data.verdict.limitante_edafica_label;
         document.getElementById('val-resiliencia').textContent = data.verdict.resiliencia_climatica_label;
         document.getElementById('val-obras').textContent = data.verdict.requiere_obras_drenaje ? "Sí (Recomendado)" : "No Requeridas";
 
@@ -229,13 +894,11 @@ import VerdictPanel from '../components/VerdictPanel.astro';
         const score = data.verdict.score_aptitud_agricola;
         document.getElementById('verdict-score').textContent = score;
 
-        // Círculo de score
         const scoreCircle = document.getElementById('score-meter');
-        const circumference = 2 * Math.PI * 42; // ~264
+        const circumference = 2 * Math.PI * 42;
         const offset = circumference - (score / 100) * circumference;
         scoreCircle.style.strokeDashoffset = offset;
 
-        // Semáforo y color del círculo
         const badgeSemaforo = document.getElementById('badge-semaforo');
         if (data.verdict.color_semaforo === 'verde') {
           scoreCircle.style.stroke = '#10b981';
@@ -253,24 +916,24 @@ import VerdictPanel from '../components/VerdictPanel.astro';
 
         document.getElementById('verdict-title').textContent = data.verdict.aptitud_productiva_label;
         document.getElementById('verdict-desc').textContent = data.verdict.dictamen_ejecutivo;
+        document.getElementById('verdict-inta-class').textContent = data.verdict.clase_capacidad_uso_label;
+        document.getElementById('verdict-inta-limit').textContent = data.verdict.limitante_edafica_label;
+        document.getElementById('verdict-inta-ip').textContent = `IP INTA: ${data.verdict.indice_productividad_ip}/100`;
 
-        // Cultivos
         const cropsBox = document.getElementById('crops-container');
         cropsBox.innerHTML = data.verdict.cultivos_sugeridos.map(c => `<span class="chip-item">${c}</span>`).join('');
 
-        // Recomendaciones
         const recommsBox = document.getElementById('recomms-list');
         recommsBox.innerHTML = data.verdict.recomendaciones_agronomicas.map(r => `<li>${r}</li>`).join('');
 
-        // Badge de tiempo
         document.getElementById('total-time-badge').textContent = `Completado en ${data.execution_time_total_ms} ms`;
 
       } catch (err) {
         console.error(err);
-        alert("Ocurrió un error al contactar el backend FastAPI o la API de JEV: " + err.message);
+        alert("Ocurrió un error al contactar el backend FastAPI: " + err.message);
       } finally {
         btnAnalyze.disabled = false;
-        btnAnalyze.innerHTML = `<span class="btn-icon">⚡</span><span class="btn-text">Ejecutar 3 Agentes JEV</span>`;
+        btnAnalyze.innerHTML = `<span class="btn-icon">⚡</span><span class="btn-text">Analizar Terreno</span>`;
       }
     }
 
@@ -291,22 +954,115 @@ import VerdictPanel from '../components/VerdictPanel.astro';
 
     btnAnalyze?.addEventListener('click', runAnalysis);
 
-    // Botón Copiar Informe
+    // Botón Copiar Informe Técnico Completo
     document.getElementById('btn-copy-report')?.addEventListener('click', () => {
-      const title = document.getElementById('verdict-title').textContent;
-      const score = document.getElementById('verdict-score').textContent;
-      const desc = document.getElementById('verdict-desc').textContent;
-      const text = `INFORME AGROJEV PBA\nLote: ${inputName.value} (Lat: ${inputLat.value}, Lon: ${inputLon.value})\nAptitud: ${title} (${score}/100)\nDictamen: ${desc}\nGenerado con JEV System One & Microsoft Planetary Computer.`;
+      if (!lastAnalysisData) return;
+      const g = lastAnalysisData.geospatial.topography.geomorphology;
+      const v = lastAnalysisData.verdict;
+      const zonesText = lastAnalysisData.geospatial.topography.terrain_zones
+        .map(z => `  - ${z.zone_name}: ${z.percentage}% (${z.area_ha} ha, cota ${z.mean_elevation_m}m)`)
+        .join('\n');
+
+      const text = [
+        `=== ESTUDIO TOPOGRÁFICO, EDÁFICO E HIDROLÓGICO AGROJEV PBA ===`,
+        `Lote: ${inputName.value} (Lat: ${inputLat.value}, Lon: ${inputLon.value} · Sup: ${inputArea.value} ha)`,
+        `Región Geomorfológica: ${g.region_geomorphology}`,
+        `Taxonomía Edáfica INTA: ${g.soil_taxonomy_inta}`,
+        `Cota: ${g.min_elevation_m}m a ${g.max_elevation_m}m (ΔH: ${g.relief_amplitude_m}m) | Pendiente: ${g.slope_pct}%`,
+        `Índices: TWI=${g.twi_value} | TPI=${g.tpi_value_m}m | Factor Erosión LS=${g.ls_erosion_factor} | Napa Freática=${g.estimated_water_table_depth_m}m`,
+        `Zonificación por Ambientes:\n${zonesText}`,
+        `Capacidad de Uso INTA: ${v.clase_capacidad_uso_label} (${v.limitante_edafica_label}) | IP=${v.indice_productividad_ip}/100`,
+        `Aptitud JEV: ${v.aptitud_productiva_label} (Score: ${v.score_aptitud_agricola}/100)`,
+        `Dictamen: ${v.dictamen_ejecutivo}`
+      ].join('\n');
+
       navigator.clipboard.writeText(text).then(() => {
-        alert("¡Informe copiado al portapapeles!");
+        alert("¡Informe topográfico y agronómico copiado al portapapeles!");
       });
     });
 
-    // Iniciar
+    // Botón Exportar GeoJSON Topográfico (Curvas de Nivel + Vectores D8 + Parcela)
+    document.getElementById('btn-export-geojson')?.addEventListener('click', () => {
+      if (!lastAnalysisData) return;
+      const topo = lastAnalysisData.geospatial.topography;
+      const features = [];
+
+      // Curvas de nivel como MultiLineString
+      topo.contours.forEach(c => {
+        const multiCoords = c.polylines.map(poly => poly.map(pt => [pt[1], pt[0]]));
+        features.push({
+          type: "Feature",
+          properties: {
+            layer: "contour_line",
+            elevation_m: c.elevation_m,
+            is_major: c.is_major
+          },
+          geometry: {
+            type: "MultiLineString",
+            coordinates: multiCoords
+          }
+        });
+      });
+
+      // Vectores de flujo D8
+      topo.flow_vectors.forEach(fv => {
+        features.push({
+          type: "Feature",
+          properties: {
+            layer: "flow_vector_d8",
+            azimuth_deg: fv.azimuth_deg,
+            slope_pct: fv.slope_pct,
+            flow_accumulation: fv.flow_accumulation,
+            is_drainage_channel: fv.is_drainage_channel
+          },
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [fv.lon, fv.lat],
+              [fv.target_lon, fv.target_lat]
+            ]
+          }
+        });
+      });
+
+      // Punto central con resumen del dictamen
+      features.push({
+        type: "Feature",
+        properties: {
+          layer: "parcel_centroid",
+          parcel_name: lastAnalysisData.request.parcel_name,
+          elevation_m: lastAnalysisData.geospatial.elevation_m,
+          slope_pct: topo.geomorphology.slope_pct,
+          twi: topo.geomorphology.twi_value,
+          tpi_m: topo.geomorphology.tpi_value_m,
+          clase_inta: lastAnalysisData.verdict.clase_capacidad_uso_label,
+          score_agricola: lastAnalysisData.verdict.score_aptitud_agricola
+        },
+        geometry: {
+          type: "Point",
+          coordinates: [lastAnalysisData.request.lon, lastAnalysisData.request.lat]
+        }
+      });
+
+      const geojsonObj = {
+        type: "FeatureCollection",
+        features
+      };
+
+      const blob = new Blob([JSON.stringify(geojsonObj, null, 2)], { type: "application/geo+json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const safeName = (lastAnalysisData.request.parcel_name || 'parcela').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+      a.download = `topografia_${safeName}.geojson`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    // Iniciar aplicación
     initMap();
     checkBackendHealth();
-    // Ejecutar análisis automático del preset inicial
-    setTimeout(runAnalysis, 600);
+    setTimeout(runAnalysis, 450);
   });
 </script>
 
@@ -319,7 +1075,7 @@ import VerdictPanel from '../components/VerdictPanel.astro';
 
   .dashboard-grid {
     display: grid;
-    grid-template-columns: 1.15fr 0.85fr;
+    grid-template-columns: 1.18fr 0.82fr;
     gap: 20px;
     padding: 16px 20px;
     flex: 1;
