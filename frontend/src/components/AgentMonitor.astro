@@ -17,22 +17,30 @@
         <div class="agent-num">01</div>
         <div class="agent-info">
           <h3 class="agent-name">GeoExtractorAgent</h3>
-          <span class="agent-sub">Microsoft Planetary STAC</span>
+          <span class="agent-sub">STAC Real + WorldCover 10m + OSM</span>
         </div>
         <span class="status-pill status-ready" id="status-agent-1">Listo</span>
       </div>
       <div class="agent-body">
         <div class="metric-row">
-          <span class="m-label">Cota Altimétrica:</span>
+          <span class="m-label">Entorno Detectado:</span>
+          <span class="m-val highlight-hydro" id="val-env-tag">--</span>
+        </div>
+        <div class="metric-row">
+          <span class="m-label">Cota Real DEM:</span>
           <span class="m-val" id="val-cota">-- m</span>
         </div>
         <div class="metric-row">
-          <span class="m-label">Pendiente estimada:</span>
+          <span class="m-label">Pendiente Real:</span>
           <span class="m-val" id="val-slope">--°</span>
         </div>
         <div class="metric-row">
-          <span class="m-label">Recurrencia JRC (35a):</span>
+          <span class="m-label">Recurrencia JRC / Agua:</span>
           <span class="m-val" id="val-jrc-pct">--%</span>
+        </div>
+        <div class="metric-row">
+          <span class="m-label">S2 (NDVI / MNDWI):</span>
+          <span class="m-val" id="val-s2-spec">--</span>
         </div>
         <div class="metric-row">
           <span class="m-label">Radar Sentinel-1 SAR:</span>
@@ -67,6 +75,10 @@
         <div class="metric-row">
           <span class="m-label">Mecanismo Dominante:</span>
           <span class="m-val" id="val-mecanismo">--</span>
+        </div>
+        <div class="metric-row">
+          <span class="m-label">Hidrografía / Costa:</span>
+          <span class="m-val" id="val-hidrografia">--</span>
         </div>
         <div class="metric-row">
           <span class="m-label">Confianza Jev:</span>

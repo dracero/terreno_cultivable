@@ -682,11 +682,12 @@ def _analyze_hydro_and_environment(
     nom_type = (nominatim.get("type") or "").lower()
     nom_cat = (nominatim.get("category") or "").lower()
     has_land_address = bool(nominatim.get("county") or nominatim.get("state"))
+    has_any_geo = bool(has_land_address or nominatim.get("country"))
 
     # 1. Océano / Mar Abierto
     is_open_ocean = (
         (not has_dem_items and not has_wc_items)
-        or (effective_water_pct >= 97.0 and c_water_ratio >= 0.96 and ctx_max_dem <= 1.2 and not has_land_address)
+        or (effective_water_pct >= 98.0 and c_water_ratio >= 0.98 and ctx_max_dem <= 1.2 and not has_any_geo)
     )
 
     # 2. Borde Costero / Mar Litoral / Estuario
@@ -776,10 +777,10 @@ def _analyze_hydro_and_environment(
         env_type = "oceano_mar_abierto"
         env_label = "Océano / Mar Abierto (Sin Suelo Terrestre)"
     elif center_is_water:
-        if coast_detected:
+        if coast_detected or (effective_water_pct >= 95.0 and ctx_max_dem <= 2.0 and not lake_detected and has_any_geo):
             water_body_type = "mar_costero_estuario"
             env_type = "cuerpo_agua_abierto"
-            env_label = "Agua Litoral / Mar Costero o Estuario"
+            env_label = "Estuario / Río Ancho o Agua Costera Litoral"
         elif river_detected:
             water_body_type = "rio_arroyo"
             env_type = "cauce_fluvial_rio"
@@ -1141,6 +1142,10 @@ async def query_planetary_stac(
 
     data_source_mode = "planetary_computer_real" if (dem_feats or wc_feats or jrc_feats) else "degraded_offline"
 
+    lc_breakdown = dict(wc_hist.get("breakdown") or {})
+    if not lc_breakdown and (hydro_env["is_open_ocean"] or hydro_env["effective_water_pct"] >= 95.0):
+        lc_breakdown = {"Cuerpo de Agua Permanente": round(hydro_env["effective_water_pct"], 1)}
+
     return {
         "bbox": bbox,
         "half_side_km": half_side_km,
@@ -1159,7 +1164,7 @@ async def query_planetary_stac(
         "sentinel2_mndwi": float(s2_metrics.get("mndwi", -0.3)),
         "sentinel2_ndvi": float(s2_metrics.get("ndvi", 0.0)),
         "satellite_scene_date": s2_metrics.get("date"),
-        "land_cover_breakdown": wc_hist.get("breakdown", {}),
+        "land_cover_breakdown": lc_breakdown,
         "hydro_env": hydro_env,
         "stac_items_found": stac_items,
         "tile_layers": tile_layers,

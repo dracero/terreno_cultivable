@@ -25,15 +25,24 @@
     </div>
 
     <div class="score-summary">
-      <h3 class="verdict-title" id="verdict-title">Selecciona un lote en Buenos Aires</h3>
+      <h3 class="verdict-title" id="verdict-title">Selecciona cualquier punto en el mapa</h3>
       <p class="verdict-desc" id="verdict-desc">
-        Haz click en el mapa satelital o elige uno de los partidos preconfigurados para iniciar el análisis multiagente con JEV y STAC.
+        Haz click en cualquier coordenada (campo, río, costa, océano, ciudad o sierra) para iniciar la auditoría satelital en tiempo real con Planetary Computer y JEV.
       </p>
       <div class="edaphic-pills-row">
         <span class="edaphic-pill" id="verdict-inta-class">Capacidad INTA: --</span>
         <span class="edaphic-pill" id="verdict-inta-limit">Limitante: --</span>
         <span class="edaphic-pill" id="verdict-inta-ip">Índice Productividad (IP): --</span>
       </div>
+      <div class="sat-meta-row" id="verdict-meta-sat">🛰️ Cobertura y escena satelital pendiente...</div>
+    </div>
+  </div>
+
+  <!-- Cobertura Real del Suelo ESA WorldCover 10m -->
+  <div class="section-box">
+    <h4 class="section-title">🛰️ Uso y Cobertura del Suelo Observada (ESA WorldCover 10m)</h4>
+    <div class="chips-container" id="worldcover-chips">
+      <span class="chip-item">Esperando telemetría WorldCover...</span>
     </div>
   </div>
 
@@ -234,5 +243,23 @@
     font-weight: bold;
     font-size: 1.1rem;
     line-height: 1;
+  }
+
+  .sat-meta-row {
+    font-size: 0.71rem;
+    color: var(--text-dim);
+    margin-top: 2px;
+    line-height: 1.35;
+  }
+
+  :global(.wc-chip) {
+    background: rgba(56, 189, 248, 0.12);
+    border: 1px solid rgba(56, 189, 248, 0.28);
+    color: #bae6fd;
+    font-size: 0.73rem;
+    font-family: var(--font-mono);
+    padding: 3px 9px;
+    border-radius: 7px;
+    font-weight: 600;
   }
 </style>

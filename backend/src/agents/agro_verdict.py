@@ -56,13 +56,13 @@ class AgroVerdictAgent:
 
         geom = geo_state.topography.geomorphology
         lc = geo_state.land_cover_breakdown or {}
-        wc_water = float(lc.get("agua_permanente_pct", 0.0))
-        wc_wetland = float(lc.get("humedal_palustre_pct", 0.0))
-        wc_urban = float(lc.get("urbano_edificado_pct", 0.0))
-        wc_crop = float(lc.get("cultivos_pct", 0.0))
-        wc_grass = float(lc.get("pastizal_herbazal_pct", 0.0))
-        wc_bare = float(lc.get("suelo_desnudo_roca_pct", 0.0))
-        wc_tree = float(lc.get("bosque_arboreo_pct", 0.0))
+        wc_water = float(lc.get("Cuerpo de Agua Permanente", lc.get("agua_permanente_pct", 0.0)))
+        wc_wetland = float(lc.get("Humedal / Bañado", lc.get("humedal_palustre_pct", 0.0)))
+        wc_urban = float(lc.get("Área Urbana / Edificada", lc.get("urbano_edificado_pct", 0.0)))
+        wc_crop = float(lc.get("Cultivo Agrícola", lc.get("cultivos_pct", 0.0)))
+        wc_grass = float(lc.get("Pastizal Natural", lc.get("pastizal_herbazal_pct", 0.0)))
+        wc_bare = float(lc.get("Suelo Desnudo / Roca / Arena", lc.get("suelo_desnudo_roca_pct", 0.0)))
+        wc_tree = float(lc.get("Bosque / Arbolado", lc.get("bosque_arboreo_pct", 0.0)))
 
         zones_pct = {z.zone_id: z.percentage for z in geo_state.topography.terrain_zones}
 

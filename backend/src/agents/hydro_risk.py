@@ -21,11 +21,15 @@ MECANISMO_LABELS = {
 }
 
 
+def _lc_val(lc: dict, label_key: str, alt_key: str) -> float:
+    return float(lc.get(label_key, lc.get(alt_key, 0.0)))
+
+
 def _describe_hydrography(geo_state: GeospatialState) -> str:
     env_type = geo_state.environment_type
     lc = geo_state.land_cover_breakdown or {}
-    wc_water = float(lc.get("agua_permanente_pct", 0.0))
-    wc_wetland = float(lc.get("humedal_palustre_pct", 0.0))
+    wc_water = _lc_val(lc, "Cuerpo de Agua Permanente", "agua_permanente_pct")
+    wc_wetland = _lc_val(lc, "Humedal / Bañado", "humedal_palustre_pct")
     dist_txt = f"a {geo_state.water_distance_m:.0f} m" if geo_state.water_distance_m is not None else "en el entorno"
 
     if env_type == "oceano_mar_abierto":
@@ -75,13 +79,13 @@ class HydroRiskAgent:
             "costa_detectada": geo_state.coast_detected,
             "rio_detectado": geo_state.river_detected,
             "urbano_detectado": geo_state.urban_detected,
-            "cobertura_agua_pct": round(float(lc.get("agua_permanente_pct", 0.0)), 1),
-            "cobertura_humedal_pct": round(float(lc.get("humedal_palustre_pct", 0.0)), 1),
-            "cobertura_urbana_pct": round(float(lc.get("urbano_edificado_pct", 0.0)), 1),
-            "cobertura_cultivo_pct": round(float(lc.get("cultivos_pct", 0.0)), 1),
-            "cobertura_pastizal_pct": round(float(lc.get("pastizal_herbazal_pct", 0.0)), 1),
-            "cobertura_suelo_desnudo_pct": round(float(lc.get("suelo_desnudo_roca_pct", 0.0)), 1),
-            "cobertura_bosque_pct": round(float(lc.get("bosque_arboreo_pct", 0.0)), 1),
+            "cobertura_agua_pct": round(_lc_val(lc, "Cuerpo de Agua Permanente", "agua_permanente_pct"), 1),
+            "cobertura_humedal_pct": round(_lc_val(lc, "Humedal / Bañado", "humedal_palustre_pct"), 1),
+            "cobertura_urbana_pct": round(_lc_val(lc, "Área Urbana / Edificada", "urbano_edificado_pct"), 1),
+            "cobertura_cultivo_pct": round(_lc_val(lc, "Cultivo Agrícola", "cultivos_pct"), 1),
+            "cobertura_pastizal_pct": round(_lc_val(lc, "Pastizal Natural", "pastizal_herbazal_pct"), 1),
+            "cobertura_suelo_desnudo_pct": round(_lc_val(lc, "Suelo Desnudo / Roca / Arena", "suelo_desnudo_roca_pct"), 1),
+            "cobertura_bosque_pct": round(_lc_val(lc, "Bosque / Arbolado", "bosque_arboreo_pct"), 1),
             "unidad_geomorfologica": geom.region_geomorphology,
             "red_drenaje": geom.drainage_network_type,
             "cota_elevacion_msnm": geo_state.elevation_m,
@@ -143,9 +147,9 @@ class HydroRiskAgent:
         confidence = round(float(choice_obj.confidence or 0.9), 3)
 
         env = geo_state.environment_type
-        wc_water = float(lc.get("agua_permanente_pct", 0.0))
-        wc_urban = float(lc.get("urbano_edificado_pct", 0.0))
-        wc_wetland = float(lc.get("humedal_palustre_pct", 0.0))
+        wc_water = _lc_val(lc, "Cuerpo de Agua Permanente", "agua_permanente_pct")
+        wc_urban = _lc_val(lc, "Área Urbana / Edificada", "urbano_edificado_pct")
+        wc_wetland = _lc_val(lc, "Humedal / Bañado", "humedal_palustre_pct")
         hidrografia = _describe_hydrography(geo_state)
 
         # Consistencia biofísica por entorno real

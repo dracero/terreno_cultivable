@@ -7,7 +7,7 @@ import VerdictPanel from '../components/VerdictPanel.astro';
 import TopoStudyPanel from '../components/TopoStudyPanel.astro';
 ---
 
-<Layout title="AgroJEV PBA | Estudio Topográfico, Auditoría Hídrica y Terrenos Cultivables">
+<Layout title="AgroJEV Satelital | Auditoría Topográfica, Hidrológica y de Suelos">
   <div class="dashboard-layout">
     <Header />
 
@@ -29,9 +29,9 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
 
     <footer class="main-footer">
       <div class="footer-content">
-        <span>AgroJEV PBA · Sistema Multiagente con JEV (TypeSafe System One), Modelado DEM Topográfico y Microsoft Planetary Computer STAC</span>
+        <span>AgroJEV Satelital · Telemetría Real Copernicus DEM + ESA WorldCover + JRC + Sentinel-2 + OSM</span>
         <span class="footer-links">
-          <span>Provincia de Buenos Aires</span> · <span>Curvas de Nivel y Escurrimiento D8</span> · <span>Capacidad de Uso INTA</span>
+          <span>Ríos, Costas y Humedales</span> · <span>Curvas de Nivel y Escurrimiento D8</span> · <span>Capacidad de Uso INTA</span>
         </span>
       </div>
     </footer>
@@ -50,6 +50,7 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
     // Capas STAC y Topográficas
     let jrcLayer = null;
     let demLayer = null;
+    let waterMaskGroup = null;
     let contourGroup = null;
     let flowGroup = null;
     let zonesGroup = null;
@@ -62,10 +63,10 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
     let mapInteractionMode = 'audit'; // 'audit' | 'transect'
     let transectStartLatLng = null;
 
-    // Coordenadas iniciales: Chascomús (Cuenca del Salado)
-    let selectedLat = -35.5765;
-    let selectedLon = -58.0125;
-    let selectedName = "Chascomús (Cuenca del Salado)";
+    // Coordenadas iniciales: Pergamino (Zona Núcleo Agrícola Rural verificada)
+    let selectedLat = -33.9500;
+    let selectedLon = -60.6200;
+    let selectedName = "Pergamino (Zona Núcleo Agrícola)";
 
     // Elementos DOM
     const inputLat = document.getElementById('input-lat');
@@ -80,6 +81,7 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
     // Checkboxes de capas
     const layerContoursCheckbox = document.getElementById('layer-contours');
     const layerFlowCheckbox = document.getElementById('layer-flow');
+    const layerWaterMaskCheckbox = document.getElementById('layer-water-mask');
     const layerZonesCheckbox = document.getElementById('layer-zones');
     const layerTransectCheckbox = document.getElementById('layer-transect');
     const layerJrcCheckbox = document.getElementById('layer-jrc');
@@ -126,6 +128,7 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
 
       // Grupos de capas topográficas locales
       zonesGroup = L.layerGroup();
+      waterMaskGroup = L.layerGroup().addTo(map);
       contourGroup = L.layerGroup().addTo(map);
       flowGroup = L.layerGroup().addTo(map);
       transectGroup = L.layerGroup().addTo(map);
@@ -172,6 +175,11 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
       layerFlowCheckbox?.addEventListener('change', (e) => {
         if (e.target.checked) map.addLayer(flowGroup);
         else map.removeLayer(flowGroup);
+      });
+
+      layerWaterMaskCheckbox?.addEventListener('change', (e) => {
+        if (e.target.checked) map.addLayer(waterMaskGroup);
+        else map.removeLayer(waterMaskGroup);
       });
 
       layerZonesCheckbox?.addEventListener('change', (e) => {
@@ -378,8 +386,8 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
       });
     }
 
-    // Dibujar Curvas de Nivel (Isolíneas), Vectores de Escurrimiento D8 y Mapa de Ambientes en Leaflet
-    function renderTopographicMapOverlays(topo) {
+    // Dibujar Curvas de Nivel (Isolíneas), Máscara de Agua/Costa/Río, Vectores D8 y Zonificación en Leaflet
+    function renderTopographicMapOverlays(topo, geoState) {
       if (!map || !topo) return;
 
       if (Array.isArray(topo.terrain_zones)) {
@@ -387,12 +395,22 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
           if (z.zone_id && z.zone_name) {
             ZONE_LABELS[z.zone_id] = z.zone_name;
           }
+          if (z.zone_id && z.color_hex) {
+            ZONE_COLORS[z.zone_id] = z.color_hex;
+          }
         });
+        const dynLegend = document.getElementById('dynamic-zone-legend');
+        if (dynLegend) {
+          dynLegend.innerHTML = topo.terrain_zones.map(z =>
+            `<div class="env-dot-row"><span class="dot" style="background:${z.color_hex};"></span><span>${z.zone_name}</span></div>`
+          ).join('');
+        }
       }
 
       contourGroup.clearLayers();
       flowGroup.clearLayers();
       zonesGroup.clearLayers();
+      if (waterMaskGroup) waterMaskGroup.clearLayers();
 
       const lats = topo.grid_lats;
       const lons = topo.grid_lons;
@@ -400,9 +418,10 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
       const zMax = topo.geomorphology.max_elevation_m;
       const zSpan = Math.max(0.5, zMax - zMin);
 
-      // 1. Rectángulos de Zonificación por Ambientes Productivos
+      // 1. Rectángulos de Zonificación + Máscara de Agua/Río/Costa/Humedal real
       const dLatHalf = (lats[1] - lats[0]) * 0.5;
       const dLonHalf = (lons[1] - lons[0]) * 0.5;
+      const waterMask = geoState?.water_mask_grid || [];
 
       for (let r = 0; r < lats.length; r++) {
         for (let c = 0; c < lons.length; c++) {
@@ -420,10 +439,26 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
             fillOpacity: 0.35
           });
           rect.bindTooltip(
-            `<b>${ZONE_LABELS[zKey]}</b><br>Cota: ${zVal} msnm`,
+            `<b>${ZONE_LABELS[zKey] || zKey}</b><br>Cota: ${zVal} msnm`,
             { sticky: true, direction: 'top' }
           );
           zonesGroup.addLayer(rect);
+
+          const wmVal = waterMask[r]?.[c] || 0;
+          if (waterMaskGroup && wmVal > 0) {
+            const wColor = wmVal === 2 ? '#0ea5e9' : '#f59e0b';
+            const wLabel = wmVal === 2
+              ? 'Agua Superficial / Cauce / Costa (WorldCover + JRC)'
+              : 'Humedal / Bañado o Saturación Recurrente';
+            const wRect = L.rectangle(bounds, {
+              color: wColor,
+              weight: 0.4,
+              fillColor: wColor,
+              fillOpacity: wmVal === 2 ? 0.34 : 0.24
+            });
+            wRect.bindTooltip(`<b>${wLabel}</b><br>Cota: ${zVal} msnm`, { sticky: true });
+            waterMaskGroup.addLayer(wRect);
+          }
         }
       }
 
@@ -707,10 +742,22 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
       const geom = topo.geomorphology;
       const verdict = data.verdict;
 
-      // Resumen rápido sobre la barra del mapa
+      // Resumen rápido sobre la barra del mapa + telemetría real
+      const gState = data.geospatial;
       document.getElementById('stat-contour-int').textContent = `${geom.contour_interval_m} m`;
       document.getElementById('stat-relief-amp').textContent = `${geom.relief_amplitude_m} m`;
       document.getElementById('stat-slope-pct').textContent = `${geom.slope_pct}%`;
+
+      const envEl = document.getElementById('stat-env-label');
+      if (envEl) envEl.textContent = gState.environment_label || gState.environment_type;
+      const wDistEl = document.getElementById('stat-water-dist');
+      if (wDistEl) {
+        wDistEl.textContent = gState.water_distance_m != null
+          ? (gState.water_distance_m === 0 ? '0 m (en agua)' : `${Math.round(gState.water_distance_m)} m`)
+          : 'Sin agua cercana';
+      }
+      const locEl = document.getElementById('stat-location-label');
+      if (locEl) locEl.textContent = gState.location_label || `${gState.lat}, ${gState.lon}`;
 
       document.getElementById('topo-region-subtitle').textContent =
         `${geom.region_geomorphology} · Red ${geom.drainage_network_type}`;
@@ -869,17 +916,20 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
         customProfileObj = null;
         if (activeProfileId === 'custom_ab') activeProfileId = 'north_south';
 
-        // Actualizar capas de mapa con teselas STAC + Curvas de Nivel + Vectores D8
+        // Actualizar capas de mapa con teselas STAC + Curvas de Nivel + Máscara Agua + Vectores D8
         updateStacTileLayers(data.geospatial.tile_layers);
-        renderTopographicMapOverlays(data.geospatial.topography);
+        renderTopographicMapOverlays(data.geospatial.topography, data.geospatial);
         updateTopoStudySection(data);
 
         // Agente 1 Completado
         status1.className = "status-pill status-done"; status1.textContent = "Completado";
-        document.getElementById('val-cota').textContent = `${data.geospatial.elevation_m} m (Δ ${data.geospatial.topography.geomorphology.relief_amplitude_m}m)`;
-        document.getElementById('val-slope').textContent = `${data.geospatial.slope_deg}° (${data.geospatial.slope_pct}%)`;
-        document.getElementById('val-jrc-pct').textContent = `${data.geospatial.jrc_occurrence_pct}%`;
-        document.getElementById('val-sar').textContent = `${data.geospatial.sar_backscatter_db} dB`;
+        const gSat = data.geospatial;
+        document.getElementById('val-env-tag').textContent = gSat.environment_label || gSat.environment_type;
+        document.getElementById('val-cota').textContent = `${gSat.elevation_m} m (Δ ${gSat.topography.geomorphology.relief_amplitude_m}m)`;
+        document.getElementById('val-slope').textContent = `${gSat.slope_deg}° (${gSat.slope_pct}%)`;
+        document.getElementById('val-jrc-pct').textContent = `${gSat.jrc_occurrence_pct}% (${gSat.jrc_seasonality})`;
+        document.getElementById('val-s2-spec').textContent = `NDVI ${Number(gSat.sentinel2_ndvi ?? 0).toFixed(2)} / MNDWI ${Number(gSat.sentinel2_mndwi ?? 0).toFixed(2)}`;
+        document.getElementById('val-sar').textContent = `${gSat.sar_backscatter_db} dB`;
 
         // Agente 2 Completado (JEV Riesgo Hidrológico)
         status2.className = "status-pill status-done"; status2.textContent = "JEV Resuelto";
@@ -888,6 +938,7 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
         document.getElementById('noul-fill').style.width = `${Math.min(100, noulProb * 100)}%`;
         document.getElementById('val-topo-score').textContent = data.hydro_risk.vulnerabilidad_topografica_label;
         document.getElementById('val-mecanismo').textContent = data.hydro_risk.mecanismo_hidrico_label;
+        document.getElementById('val-hidrografia').textContent = data.hydro_risk.hidrografia_detectada || '--';
         document.getElementById('val-hydro-conf').textContent = `${(data.hydro_risk.confidence * 100).toFixed(0)}%`;
 
         // Agente 3 Completado (JEV Dictamen Agronómico + INTA)
@@ -904,7 +955,7 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
 
         // Actualizar Panel de Dictamen Ejecutivo
         const score = data.verdict.score_aptitud_agricola;
-        document.getElementById('verdict-score').textContent = score;
+        document.getElementById('verdict-score').textContent = score ?? '--';
 
         const scoreCircle = document.getElementById('score-meter');
         const circumference = 2 * Math.PI * 42;
@@ -912,8 +963,9 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
         scoreCircle.style.strokeDashoffset = offset;
 
         const badgeSemaforo = document.getElementById('badge-semaforo');
+        const envKey = gSat.environment_type || '';
         const isErosionOrLithic = data.verdict.limitante_edafica_codigo === 'erosion_escorrentia_e'
-          || (data.geospatial?.slope_pct >= 5.0);
+          || (gSat.slope_pct >= 5.0);
         if (data.verdict.color_semaforo === 'verde') {
           scoreCircle.style.stroke = '#10b981';
           badgeSemaforo.className = "badge badge-agri";
@@ -921,15 +973,27 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
         } else if (data.verdict.color_semaforo === 'amarillo') {
           scoreCircle.style.stroke = '#f59e0b';
           badgeSemaforo.className = "badge badge-warning";
-          badgeSemaforo.textContent = isErosionOrLithic
-            ? "Aptitud Restringida / Pendiente y Tosca"
-            : "Aptitud Mixta / Alerta Hídrica";
+          badgeSemaforo.textContent = envKey === 'lote_ribereño_fluvial'
+            ? "Ribera Fluvial / Uso Conservacionista"
+            : (envKey === 'borde_costero_marino'
+              ? "Faja Costera / Aptitud Restringida"
+              : (isErosionOrLithic ? "Aptitud Restringida / Pendiente y Sustrato" : "Aptitud Mixta / Alerta Hídrica"));
         } else {
           scoreCircle.style.stroke = '#ef4444';
           badgeSemaforo.className = "badge badge-danger";
-          badgeSemaforo.textContent = isErosionOrLithic
-            ? "No Cultivable / Roca y Pendiente"
-            : "No Cultivable / Alto Riesgo Hídrico";
+          if (envKey === 'oceano_mar_abierto') {
+            badgeSemaforo.textContent = "Mar Abierto / Sin Suelo Agrícola";
+          } else if (envKey === 'cuerpo_agua_abierto' || envKey === 'cauce_fluvial_rio' || envKey === 'laguna_cuerpo_agua') {
+            badgeSemaforo.textContent = "Cuerpo de Agua / Cauce Activo";
+          } else if (envKey === 'area_urbana') {
+            badgeSemaforo.textContent = "Área Urbana Consolidada / No Rural";
+          } else if (envKey === 'borde_costero_marino') {
+            badgeSemaforo.textContent = "Frente Costero / No Cultivable";
+          } else if (envKey === 'relieve_serrano_escarpado' || isErosionOrLithic) {
+            badgeSemaforo.textContent = "No Cultivable / Relieve Escarpado";
+          } else {
+            badgeSemaforo.textContent = "No Cultivable / Limitación Crítica";
+          }
         }
 
         document.getElementById('verdict-title').textContent = data.verdict.aptitud_productiva_label;
@@ -937,6 +1001,26 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
         document.getElementById('verdict-inta-class').textContent = data.verdict.clase_capacidad_uso_label;
         document.getElementById('verdict-inta-limit').textContent = data.verdict.limitante_edafica_label;
         document.getElementById('verdict-inta-ip').textContent = `IP INTA: ${data.verdict.indice_productividad_ip}/100`;
+
+        const metaSatEl = document.getElementById('verdict-meta-sat');
+        if (metaSatEl) {
+          const s2DateTxt = gSat.satellite_scene_date ? ` · 🛰️ Escena Sentinel-2: ${gSat.satellite_scene_date}` : '';
+          metaSatEl.textContent = `📍 ${gSat.location_label}${s2DateTxt}`;
+        }
+
+        const wcBox = document.getElementById('worldcover-chips');
+        if (wcBox) {
+          const entries = Object.entries(gSat.land_cover_breakdown || {})
+            .filter(([, pct]) => Number(pct) >= 0.1)
+            .sort((a, b) => Number(b[1]) - Number(a[1]));
+          if (entries.length > 0) {
+            wcBox.innerHTML = entries
+              .map(([label, pct]) => `<span class="wc-chip">${label}: ${Number(pct).toFixed(1)}%</span>`)
+              .join('');
+          } else {
+            wcBox.innerHTML = `<span class="wc-chip">Sin cobertura terrestre continental (Aguas Abiertas)</span>`;
+          }
+        }
 
         const cropsBox = document.getElementById('crops-container');
         cropsBox.innerHTML = data.verdict.cultivos_sugeridos.map(c => `<span class="chip-item">${c}</span>`).join('');
@@ -976,18 +1060,21 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
     document.getElementById('btn-copy-report')?.addEventListener('click', () => {
       if (!lastAnalysisData) return;
       const g = lastAnalysisData.geospatial.topography.geomorphology;
+      const gSat = lastAnalysisData.geospatial;
       const v = lastAnalysisData.verdict;
       const zonesText = lastAnalysisData.geospatial.topography.terrain_zones
         .map(z => `  - ${z.zone_name}: ${z.percentage}% (${z.area_ha} ha, cota ${z.mean_elevation_m}m)`)
         .join('\n');
 
       const text = [
-        `=== ESTUDIO TOPOGRÁFICO, EDÁFICO E HIDROLÓGICO AGROJEV PBA ===`,
-        `Lote: ${inputName.value} (Lat: ${inputLat.value}, Lon: ${inputLon.value} · Sup: ${inputArea.value} ha)`,
+        `=== ESTUDIO TOPOGRÁFICO, EDÁFICO E HIDROLÓGICO AGROJEV SATELITAL ===`,
+        `Lote: ${inputName.value} | OSM: ${gSat.location_label} (Lat: ${inputLat.value}, Lon: ${inputLon.value} · Sup: ${inputArea.value} ha)`,
+        `Entorno Detectado: ${gSat.environment_label} | Hidrografía: ${lastAnalysisData.hydro_risk.hidrografia_detectada}`,
         `Región Geomorfológica: ${g.region_geomorphology}`,
-        `Taxonomía Edáfica INTA: ${g.soil_taxonomy_inta}`,
-        `Cota: ${g.min_elevation_m}m a ${g.max_elevation_m}m (ΔH: ${g.relief_amplitude_m}m) | Pendiente: ${g.slope_pct}%`,
-        `Índices: TWI=${g.twi_value} | TPI=${g.tpi_value_m}m | Factor Erosión LS=${g.ls_erosion_factor} | Napa Freática=${g.estimated_water_table_depth_m}m`,
+        `Taxonomía Edáfica / Sustrato: ${g.soil_taxonomy_inta}`,
+        `Cota DEM: ${g.min_elevation_m}m a ${g.max_elevation_m}m (ΔH: ${g.relief_amplitude_m}m) | Pendiente: ${g.slope_pct}%`,
+        `Espectro Sentinel-2: NDVI=${gSat.sentinel2_ndvi} | MNDWI=${gSat.sentinel2_mndwi} | JRC=${gSat.jrc_occurrence_pct}%`,
+        `Índices: TWI=${g.twi_value} | TPI=${g.tpi_value_m}m | Factor Erosión LS=${g.ls_erosion_factor} | Napa Est.=${g.estimated_water_table_depth_m}m`,
         `Zonificación por Ambientes:\n${zonesText}`,
         `Capacidad de Uso INTA: ${v.clase_capacidad_uso_label} (${v.limitante_edafica_label}) | IP=${v.indice_productividad_ip}/100`,
         `Aptitud JEV: ${v.aptitud_productiva_label} (Score: ${v.score_aptitud_agricola}/100)`,
