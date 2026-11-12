@@ -27,6 +27,8 @@ El sistema combina datos satelitales abiertos de **Microsoft Planetary Computer 
 8. [Guía de Instalación y Ejecución](#8-guía-de-instalación-y-ejecución)
 9. [Casos de Estudio Reales en Buenos Aires](#9-casos-de-estudio-reales-en-buenos-aires)
 10. [Especificación de la API REST](#10-especificación-de-la-api-rest)
+11. [Auditoría Técnica Integral (Frontend, Backend y Caso Sierras de la Ventana)](#11-auditoría-técnica-integral-frontend-backend-y-caso-sierras-de-la-ventana)
+12. [Licencia y Créditos](#12-licencia-y-créditos)
 
 ---
 
@@ -476,7 +478,43 @@ Ejecuta el pipeline multiagente y el motor topográfico para una coordenada y su
 
 ---
 
-## 11. Licencia y Créditos
+## 11. Auditoría Técnica Integral (Frontend, Backend y Caso Sierras de la Ventana)
+
+### 11.1. Diagnóstico de Causa Raíz: ¿Por qué Sierras de la Ventana arrojaba "Terreno Cultivable"?
+Durante la auditoría del pipeline hidro-edáfico y topográfico se identificaron **5 causas raíz encadenadas** que provocaban que los cordones rocosos escarpados del **Sistema de Ventania** (`lat: -38.145, lon: -61.975`) fueran diagnosticados erróneamente como *Apto Agricultura Continua* (`95–98/100 🟢`):
+
+1. **Lógica de aptitud unidimensional centrada sólo en anegamiento (`jev_service.py`):**
+   * El evaluador determinaba `aptitud` y `resiliencia` exclusivamente a partir de `flood_p` (probabilidad de inundación), `jrc` (ocurrencia de agua superficial) y `dep` (índice de depresión relativa).
+   * Como en las Sierras de la Ventana el escurrimiento es rápido (`dep = 0.03–0.05`, `jrc = 0%`, `flood_p = 0.08`), el árbol de decisión caía directamente en la rama por defecto `agricola_plena = 0.82` (*Apto Agricultura Continua*), omitiendo pendientes superiores al $11\%\text{–}25\%$, el factor de erosión hídrica $\text{USLE } LS > 3.0$ y el contacto lítico rocoso somero ($< 25\text{ cm}$).
+2. **Fórmula de Score Agrícola sin penalización topográfica ni lítica (`agro_verdict.py`):**
+   * El cálculo original $\text{Score} = \text{Base} - (30 \times P_{\text{inundación}}) + (8 \times \text{Resiliencia})$ sólo restaba puntos por riesgo de inundación y sumaba $+16$ de bonificación por ausencia de excesos hídricos, sin descontar pendiente crítica (`slope_pct`), factor de erosión (`ls_erosion_factor`) ni limitación de suelo lítico/rocoso (**Clases VII–VIII INTA**).
+3. **Restricción semántica en las opciones `Choice` de JEV (`agro_verdict.py`):**
+   * La categoría no arable `no_agricola_humedal` estaba descripta únicamente como *"espejo de agua o bajo permanente"*. Ante un macizo montañoso seco, ni el LLM remoto ni el calibrador seleccionaban dicha clase, y el texto ejecutivo de salida la etiquetaba como *"cubeta receptora"*.
+4. **Inversión de la zonificación altimétrica en macizos rocosos (`topography_engine.py`):**
+   * En la llanura pampeana, el cuartil superior de cotas (`zv >= z_q78`) corresponde a la *Loma Alta Bien Drenada* (suelo profundo apto para maíz y soja). En cambio, en un cordón serrano plegado (`morph_type == "serrano_escarpado"`), las cotas superiores son **cumbres y afloramientos rocosos cuarcíticos desnudos** y las medias son **laderas escarpadas no arables**. Clasificar el $72\%$ superior de la sierra como `loma_alta + media_loma` inflaba artificialmente el Índice de Productividad ($\text{IP INTA}$).
+5. **Generalización geomorfológica radial entre Ventania y Tandilia (`planetary_stac.py` y `topography_engine.py`):**
+   * Un único radio simple no diferenciaba el **Cordón Serrano Escarpado de Ventania** (Cerro Tres Picos, Sierra de la Ventana, Villa Ventana, Abra de la Ventana, Curamalal, Pillahuincó; $360\text{–}770+\text{ msnm}$, pendientes $11\%\text{–}26\%$) del **Piedemonte Serrano agrícola** (lomadas Argiudoles profundas de Tandil).
+
+### 11.2. Auditoría del Backend y Soluciones Implementadas
+* **Geomorfología multi-nodo para el Sistema de Ventania y Tandilia (`planetary_stac.py`, `topography_engine.py`):**
+  * Se implementó `_ventania_ridge_distance(lat, lon)` sobre los nodos estructurales del arco serrano de Ventania, diferenciando el **Cordón Rocoso Escarpado** (`morph_type = "serrano_escarpado"`, equidistancia `10 m`) del **Piedemonte Periserrano con tosca somera** y del **Piedemonte de Tandilia**.
+  * En terrenos `serrano_escarpado`, la zonificación invierte la asignación altimétrica para que las crestas se clasifiquen como **Cumbre y Afloramiento Rocoso Cuarcítico (`#ef4444`)** y las laderas como **Ladera Serrana Escarpada (`#f59e0b`)**.
+* **Salvaguarda biofísica INTA y penalización topográfica/lítica (`jev_service.py`, `agro_verdict.py`, `hydro_risk.py`):**
+  * Se incorporaron los flags `is_rocky_serrano` (`pendiente >= 8.5%` o `cota >= 310 m` con `pendiente >= 5.5%`) e `is_steep_piedemonte`, asignando **Clases VII–VIII (`Subclase e/s · Pendiente escarpada y contacto lítico rocoso <25 cm`)**, penalización `penalty_topo_edafico` y dictamen específico de **No Cultivable (Afloramiento Rocoso / Relieve Serrano Escarpado)** con **Score `5/100 🔴` (`IP INTA 4/100`)**.
+* **Rotador de API Keys Resiliente (`key_rotator.py`, `config.py`, `jev_service.py`):**
+  * Parser multi-clave desde `.env` con deduplicación, recarga automática en caliente (`mtime`), control de concurrencia por clave (`in_flight`), transporte IPv4 directo y enfriamiento exponencial con *jitter* ante errores HTTP `408, 409, 429, 500, 502, 503, 504`.
+
+### 11.3. Auditoría del Frontend (`frontend/src/`)
+* **Sincronización dinámica de ambientes en Mapa y Perfil SVG (`index.astro`):**
+  * El diccionario `ZONE_LABELS` utilizado por los *tooltips* de la malla Leaflet y de la sonda interactiva del perfil SVG ahora se sincroniza dinámicamente con `topo.terrain_zones` devuelto por el backend, mostrando los nombres de ambientes serranos cuando se audita Ventania.
+* **Semáforo y etiquetas contextuales (`index.astro`, `AgentMonitor.astro`, `MapViewer.astro`):**
+  * Se corrigió el color fijo verde en `#val-aptitud-tag` para que refleje el estado real del semáforo (`verde`, `amarillo`, `rojo`).
+  * El badge del dictamen ejecutivo ahora distingue entre *"No Cultivable / Roca y Pendiente"* (restricción topográfica/lítica `e/s`) y *"No Cultivable / Alto Riesgo Hídrico"* (restricción por anegamiento `w`).
+  * Se incorporó el botón testigo **`🏔️ Sierra de la Ventana (Roca)`** en la barra superior del mapa para auditar el cordón serrano con un clic.
+
+---
+
+## 12. Licencia y Créditos
 
 * **Datos Satelitales:** Microsoft Planetary Computer STAC, European Commission Joint Research Centre (JRC), Agencia Espacial Europea (ESA) Copernicus.
 * **Inteligencia de Decisión:** [TypeSafe AI](https://typesafe.ai) System One Model Jev.
