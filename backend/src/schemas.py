@@ -2,8 +2,8 @@ from typing import List, Dict, Optional, Any
 from pydantic import BaseModel, Field
 
 class AnalyzeRequest(BaseModel):
-    lat: float = Field(..., description="Latitud en Provincia de Buenos Aires (ej: -35.57)")
-    lon: float = Field(..., description="Longitud en Provincia de Buenos Aires (ej: -58.01)")
+    lat: float = Field(..., description="Latitud en grados decimales (ej: -35.57)")
+    lon: float = Field(..., description="Longitud en grados decimales (ej: -58.01)")
     parcel_name: Optional[str] = Field(default="Parcela Rural", description="Nombre o identificación del lote")
     area_ha: Optional[float] = Field(default=100.0, description="Superficie aproximada en hectáreas")
 
@@ -109,15 +109,29 @@ class GeospatialState(BaseModel):
     lon: float
     area_ha: float = 100.0
     bbox: List[float]
+    location_label: str = "Ubicación Satelital"
+    environment_type: str = "rural_agricola"
+    environment_label: str = "Terreno Rural"
+    water_body_type: str = "ninguno"
+    water_distance_m: Optional[float] = None
+    coast_detected: bool = False
+    river_detected: bool = False
+    urban_detected: bool = False
     elevation_m: float
     slope_deg: float
     slope_pct: float = 0.1
-    relative_depression_score: float # 0.0 (loma) a 1.0 (cubeta cerrada)
-    jrc_occurrence_pct: float # 0 a 100%
-    jrc_max_extent: bool # True si alguna vez se inundó en los últimos 35 años
-    jrc_seasonality: str # "permanente", "estacional", "efímero" o "seco"
-    sar_backscatter_db: float # retrodispersión radar Sentinel-1
-    sentinel2_ndwi: float # índice de agua / humedad (-1 a 1)
+    relative_depression_score: float  # 0.0 (alto/bien drenado) a 1.0 (depresión inundable/agua)
+    jrc_occurrence_pct: float  # 0 a 100%
+    jrc_max_extent: bool  # True si alguna vez tuvo agua en JRC 35+ años
+    jrc_seasonality: str  # "permanente", "estacional", "efímero", "seco" o "mar abierto"
+    sar_backscatter_db: float  # retrodispersión radar Sentinel-1 en dB
+    sentinel2_ndwi: float  # índice de agua / humedad (-1 a 1)
+    sentinel2_mndwi: float = 0.0  # índice modificado de agua (B03-B11)/(B03+B11)
+    sentinel2_ndvi: float = 0.0  # índice de vegetación (B08-B04)/(B08+B04)
+    satellite_scene_date: Optional[str] = None
+    land_cover_breakdown: Dict[str, float] = Field(default_factory=dict)
+    water_mask_grid: List[List[int]] = Field(default_factory=list)
+    data_source_mode: str = "planetary_computer_real"
     stac_items_found: Dict[str, str]
     tile_layers: List[TileLayerInfo]
     topography: TopographicAnalysisData
@@ -131,6 +145,7 @@ class HydroRiskProfile(BaseModel):
     mecanismo_probabilities: Dict[str, float]
     confidence: float
     resumen_hidrologico: str
+    hidrografia_detectada: str = "Sin cursos ni espejos superficiales cercanos"
 
 class AgroVerdict(BaseModel):
     aptitud_productiva: str

@@ -42,13 +42,27 @@ class _SystemOneFallbackResponse:
 
 def _compute_calibrated_fallback(state: Dict[str, Any], questions: Dict[str, Any]) -> _SystemOneFallbackResponse:
     """
-    Motor de respaldo calibrado con ecuaciones hidro-edáficas pampeanas cuando la API
-    remota devuelve 503/409 o todas las claves están temporalmente en enfriamiento.
-    Produce las mismas estructuras tipadas (Noul, Score, Choice) a partir del estado biofísico.
+    Motor de respaldo biofísico global cuando la API remota devuelve 503/409 o las claves están
+    en enfriamiento. Clasifica océano, ríos, costas, humedales, zonas urbanas, sierras escarpadas,
+    suelos desnudos, bosques y planicies agrícolas exclusivamente a partir de métricas reales.
     """
     nouls: Dict[str, _NoulResult] = {}
     scores: Dict[str, _ScoreResult] = {}
     choices: Dict[str, _ChoiceResult] = {}
+
+    env_type = str(state.get("entorno_detectado", "rural_agricola"))
+    water_dist_m = state.get("distancia_agua_m")
+    wc_water = float(state.get("cobertura_agua_pct", 0.0))
+    wc_wetland = float(state.get("cobertura_humedal_pct", 0.0))
+    wc_urban = float(state.get("cobertura_urbana_pct", 0.0))
+    wc_crop = float(state.get("cobertura_cultivo_pct", 0.0))
+    wc_grass = float(state.get("cobertura_pastizal_pct", 0.0))
+    wc_bare = float(state.get("cobertura_suelo_desnudo_pct", 0.0))
+    wc_tree = float(state.get("cobertura_bosque_pct", 0.0))
+    ndvi = float(state.get("ndvi_sentinel2", 0.0))
+    mndwi = float(state.get("mndwi_sentinel2", 0.0))
+    river_detected = bool(state.get("rio_detectado", False))
+    coast_detected = bool(state.get("costa_detectada", False))
 
     dep = float(state.get("indice_depresion_relativa_0_a_1", 0.35))
     jrc = float(
@@ -59,12 +73,7 @@ def _compute_calibrated_fallback(state: Dict[str, Any], questions: Dict[str, Any
     )
     slope_deg = float(state.get("pendiente_grados", 0.3))
     slope_pct = float(state.get("pendiente_porcentaje", 0.5))
-    cota_m = float(
-        state.get(
-            "cota_msnm",
-            state.get("cota_elevacion_msnm", 35.0),
-        )
-    )
+    cota_m = float(state.get("cota_msnm", state.get("cota_elevacion_msnm", 35.0)))
     napa_m = float(
         state.get(
             "profundidad_napa_freatica_estimada_m",
@@ -73,22 +82,63 @@ def _compute_calibrated_fallback(state: Dict[str, Any], questions: Dict[str, Any
     )
     amplitud_m = float(state.get("amplitud_relieve_m", 1.5))
     ls_factor = float(state.get("factor_erosion_usle_ls", 0.2))
-    is_rocky_serrano = slope_pct >= 8.5 or (cota_m >= 310.0 and slope_pct >= 5.5)
-    is_steep_piedemonte = (not is_rocky_serrano) and (
-        slope_pct >= 5.0 or (cota_m >= 245.0 and slope_pct >= 3.8)
+
+    is_water_body = env_type in (
+        "oceano_mar_abierto",
+        "cuerpo_agua_abierto",
+        "cauce_fluvial_rio",
+        "laguna_cuerpo_agua",
+    )
+    is_urban = env_type == "area_urbana"
+    is_coast = env_type == "borde_costero_marino"
+    is_wetland = env_type == "humedal_delta"
+    is_riparian = env_type == "lote_ribereño_fluvial"
+    is_bare = env_type == "suelo_desnudo_arenal_roca"
+    is_forest = env_type == "bosque_monte"
+    is_rocky_serrano = (env_type == "relieve_serrano_escarpado") or (
+        not is_water_body and not is_urban and slope_pct >= 8.5
+    )
+    is_steep_piedemonte = (
+        (not is_rocky_serrano)
+        and (not is_water_body)
+        and (not is_urban)
+        and (slope_pct >= 4.5 or ls_factor >= 1.6)
     )
 
-    # Probabilidad calibrada de inundación severa
-    flood_p = min(
-        0.95,
-        max(
-            0.08,
-            0.46 * dep
-            + 0.0085 * jrc
-            + max(0.0, (1.2 - napa_m) * 0.12)
-            - min(0.20, slope_deg * 0.07),
-        ),
-    )
+    if is_water_body:
+        flood_p = 0.99 if env_type == "oceano_mar_abierto" else 0.97
+    elif is_wetland:
+        flood_p = min(0.95, max(0.70, 0.52 + 0.006 * jrc + 0.005 * wc_wetland + 0.008 * wc_water))
+    elif is_rocky_serrano:
+        flood_p = max(0.03, min(0.18, 0.05 + 0.003 * jrc))
+    elif is_coast:
+        near_shore = water_dist_m is not None and float(water_dist_m) <= 150.0
+        if cota_m >= 10.0 and slope_pct >= 3.0:
+            flood_p = max(0.12, min(0.32, 0.14 + 0.004 * wc_water))
+        elif near_shore or wc_water >= 20.0:
+            flood_p = min(0.86, max(0.42, 0.30 + 0.006 * wc_water + 0.005 * jrc + max(0.0, (2.5 - cota_m) * 0.10)))
+        else:
+            flood_p = min(0.60, max(0.22, 0.24 + 0.005 * wc_water + 0.25 * dep))
+    elif is_riparian:
+        dist_val = float(water_dist_m) if water_dist_m is not None else 200.0
+        prox_term = max(0.0, (450.0 - min(450.0, dist_val)) / 850.0)
+        flood_p = min(0.88, max(0.40, 0.30 + prox_term + 0.008 * jrc + 0.008 * wc_water + 0.18 * dep))
+    elif is_urban:
+        flood_p = min(0.82, max(0.12, 0.16 + 0.35 * dep + 0.007 * jrc - min(0.18, slope_deg * 0.06)))
+    else:
+        flood_p = min(
+            0.94,
+            max(
+                0.06,
+                0.38 * dep
+                + 0.0075 * jrc
+                + 0.006 * wc_water
+                + 0.005 * wc_wetland
+                + max(0.0, (1.2 - napa_m) * 0.10)
+                - min(0.22, slope_deg * 0.08),
+            ),
+        )
+
     flood_p = round(float(state.get("probabilidad_inundacion_severa", flood_p)), 3)
 
     for q_key, q_obj in questions.items():
@@ -96,25 +146,27 @@ def _compute_calibrated_fallback(state: Dict[str, Any], questions: Dict[str, Any
             if q_key == "riesgo_severo":
                 nouls[q_key] = _NoulResult(noul=flood_p)
             elif q_key == "requiere_obras":
-                if is_rocky_serrano:
-                    obras_p = 0.22  # No arable; obras de labranza o drenaje no viables en roca
+                if is_water_body or is_urban or is_rocky_serrano or is_bare:
+                    obras_p = 0.15
+                elif is_riparian or is_coast or flood_p >= 0.40 or ls_factor >= 0.8:
+                    obras_p = min(0.94, max(0.35, flood_p * 0.85 + (0.28 if ls_factor > 0.8 else 0.0)))
                 else:
-                    obras_p = min(
-                        0.95,
-                        max(0.08, flood_p * 0.85 + (0.35 if ls_factor > 0.8 else 0.0)),
-                    )
+                    obras_p = min(0.90, max(0.08, flood_p * 0.82 + (0.30 if ls_factor > 0.8 else 0.0)))
                 nouls[q_key] = _NoulResult(noul=round(obras_p, 3))
             elif q_key == "manejo_ambientes":
-                amb_p = min(0.96, max(0.25, 0.35 + min(0.55, amplitud_m * 0.14)))
+                if is_water_body or is_urban:
+                    amb_p = 0.08
+                else:
+                    amb_p = min(0.96, max(0.25, 0.35 + min(0.55, amplitud_m * 0.14)))
                 nouls[q_key] = _NoulResult(noul=round(amb_p, 3))
             else:
                 nouls[q_key] = _NoulResult(noul=round(flood_p, 3))
 
         elif isinstance(q_obj, Score):
             if q_key == "vulnerabilidad_topografica":
-                if flood_p >= 0.70 or dep >= 0.75:
+                if is_water_body or is_wetland or flood_p >= 0.70 or dep >= 0.75:
                     s_val = 3.0
-                elif flood_p >= 0.42 or dep >= 0.50:
+                elif is_riparian or flood_p >= 0.42 or dep >= 0.50:
                     s_val = 2.0
                 elif slope_deg < 1.2:
                     s_val = 1.0
@@ -122,9 +174,9 @@ def _compute_calibrated_fallback(state: Dict[str, Any], questions: Dict[str, Any
                     s_val = 0.0
                 scores[q_key] = _ScoreResult(score=s_val, confidence=0.93)
             elif q_key == "resiliencia":
-                if is_rocky_serrano or flood_p >= 0.65:
+                if is_water_body or is_urban or is_rocky_serrano or is_bare or is_wetland or flood_p >= 0.65:
                     r_val = 0.0
-                elif is_steep_piedemonte or flood_p >= 0.32:
+                elif is_coast or is_riparian or is_steep_piedemonte or flood_p >= 0.30:
                     r_val = 1.0
                 else:
                     r_val = 2.0
@@ -134,26 +186,26 @@ def _compute_calibrated_fallback(state: Dict[str, Any], questions: Dict[str, Any
 
         elif isinstance(q_obj, Choice):
             if q_key == "mecanismo_hidrico":
-                if flood_p < 0.22 and slope_deg >= 0.45:
+                if is_water_body or is_coast or is_riparian or coast_detected or river_detected or jrc >= 30.0:
                     probs = {
-                        "sin_anegamiento": 0.78,
+                        "desborde_cuenca": 0.74,
                         "escurrimiento_pluvial_lento": 0.14,
-                        "afloramiento_napa_freatica": 0.05,
-                        "desborde_cuenca": 0.03,
-                    }
-                elif jrc >= 35.0:
-                    probs = {
-                        "escurrimiento_pluvial_lento": 0.54,
-                        "desborde_cuenca": 0.31,
-                        "afloramiento_napa_freatica": 0.12,
+                        "afloramiento_napa_freatica": 0.09,
                         "sin_anegamiento": 0.03,
                     }
-                elif napa_m <= 1.3:
+                elif is_rocky_serrano or (flood_p < 0.22 and slope_deg >= 0.45):
                     probs = {
-                        "afloramiento_napa_freatica": 0.52,
-                        "escurrimiento_pluvial_lento": 0.36,
-                        "desborde_cuenca": 0.08,
-                        "sin_anegamiento": 0.04,
+                        "sin_anegamiento": 0.80,
+                        "escurrimiento_pluvial_lento": 0.13,
+                        "afloramiento_napa_freatica": 0.04,
+                        "desborde_cuenca": 0.03,
+                    }
+                elif is_wetland or napa_m <= 1.2:
+                    probs = {
+                        "afloramiento_napa_freatica": 0.50,
+                        "desborde_cuenca": 0.28,
+                        "escurrimiento_pluvial_lento": 0.19,
+                        "sin_anegamiento": 0.03,
                     }
                 else:
                     probs = {
@@ -163,111 +215,119 @@ def _compute_calibrated_fallback(state: Dict[str, Any], questions: Dict[str, Any
                         "sin_anegamiento": 0.07,
                     }
                 top_c = max(probs.items(), key=lambda kv: kv[1])[0]
-                choices[q_key] = _ChoiceResult(
-                    choice=top_c, probabilities=probs, confidence=0.92
-                )
+                choices[q_key] = _ChoiceResult(choice=top_c, probabilities=probs, confidence=0.92)
 
             elif q_key == "aptitud":
-                if is_rocky_serrano or flood_p >= 0.72 or jrc >= 38.0:
+                coast_non_arable = is_coast and (
+                    wc_crop < 15.0
+                    or wc_bare >= 25.0
+                    or slope_pct >= 6.0
+                    or (water_dist_m is not None and float(water_dist_m) <= 180.0)
+                )
+                wetland_non_arable = is_wetland and (wc_water + wc_wetland >= 45.0 or jrc >= 40.0)
+
+                if is_water_body or is_urban or is_rocky_serrano or is_bare or coast_non_arable or wetland_non_arable or flood_p >= 0.72:
                     probs = {
-                        "no_agricola_humedal": 0.79 if is_rocky_serrano else 0.74,
-                        "ganadero_pastizal_bajos": 0.17 if is_rocky_serrano else 0.21,
-                        "mixto_agricola_ganadero": 0.03 if is_rocky_serrano else 0.04,
+                        "no_agricola_humedal": 0.86,
+                        "ganadero_pastizal_bajos": 0.10,
+                        "mixto_agricola_ganadero": 0.03,
                         "agricola_plena": 0.01,
                     }
-                elif is_steep_piedemonte or flood_p >= 0.44 or dep >= 0.60:
+                elif is_wetland or is_forest or (is_steep_piedemonte and wc_crop < 30.0) or (is_riparian and (flood_p >= 0.56 or wc_crop < 15.0)) or flood_p >= 0.46:
                     probs = {
-                        "ganadero_pastizal_bajos": 0.64,
-                        "mixto_agricola_ganadero": 0.26,
-                        "no_agricola_humedal": 0.07,
+                        "ganadero_pastizal_bajos": 0.66,
+                        "mixto_agricola_ganadero": 0.22,
+                        "no_agricola_humedal": 0.09,
                         "agricola_plena": 0.03,
                     }
-                elif slope_pct >= 3.8 or flood_p >= 0.24:
+                elif is_riparian or is_coast or is_steep_piedemonte or slope_pct >= 2.8 or flood_p >= 0.24 or (wc_crop < 25.0 and wc_grass >= 25.0):
                     probs = {
-                        "mixto_agricola_ganadero": 0.64,
-                        "agricola_plena": 0.24,
-                        "ganadero_pastizal_bajos": 0.10,
-                        "no_agricola_humedal": 0.02,
+                        "mixto_agricola_ganadero": 0.65,
+                        "agricola_plena": 0.20,
+                        "ganadero_pastizal_bajos": 0.12,
+                        "no_agricola_humedal": 0.03,
                     }
                 else:
                     probs = {
-                        "agricola_plena": 0.82,
-                        "mixto_agricola_ganadero": 0.15,
+                        "agricola_plena": 0.84,
+                        "mixto_agricola_ganadero": 0.13,
                         "ganadero_pastizal_bajos": 0.02,
                         "no_agricola_humedal": 0.01,
                     }
                 top_c = max(probs.items(), key=lambda kv: kv[1])[0]
-                choices[q_key] = _ChoiceResult(
-                    choice=top_c, probabilities=probs, confidence=0.93
-                )
+                choices[q_key] = _ChoiceResult(choice=top_c, probabilities=probs, confidence=0.93)
 
             elif q_key == "clase_inta":
-                if is_rocky_serrano or flood_p >= 0.72 or jrc >= 38.0:
+                coast_non_arable = is_coast and (
+                    wc_crop < 15.0
+                    or wc_bare >= 25.0
+                    or slope_pct >= 6.0
+                    or (water_dist_m is not None and float(water_dist_m) <= 180.0)
+                )
+                wetland_non_arable = is_wetland and (wc_water + wc_wetland >= 45.0 or jrc >= 40.0)
+
+                if is_water_body or is_urban or is_rocky_serrano or is_bare or coast_non_arable or wetland_non_arable or flood_p >= 0.72:
                     probs = {
-                        "clase_VII_VIII": 0.82 if is_rocky_serrano else 0.76,
-                        "clase_V_VI": 0.14 if is_rocky_serrano else 0.20,
-                        "clase_III_IV": 0.03,
+                        "clase_VII_VIII": 0.86,
+                        "clase_V_VI": 0.11,
+                        "clase_III_IV": 0.02,
                         "clase_I_II": 0.01,
                     }
-                elif is_steep_piedemonte or flood_p >= 0.44 or dep >= 0.60:
+                elif is_wetland or is_forest or (is_steep_piedemonte and wc_crop < 30.0) or (is_riparian and (flood_p >= 0.56 or wc_crop < 15.0)) or flood_p >= 0.46:
                     probs = {
-                        "clase_V_VI": 0.68,
-                        "clase_III_IV": 0.21,
+                        "clase_V_VI": 0.69,
+                        "clase_III_IV": 0.20,
                         "clase_VII_VIII": 0.09,
                         "clase_I_II": 0.02,
                     }
-                elif flood_p >= 0.24 or slope_pct >= 2.2:
+                elif is_riparian or is_coast or is_steep_piedemonte or flood_p >= 0.24 or slope_pct >= 2.2 or (wc_crop < 25.0 and wc_grass >= 25.0):
                     probs = {
-                        "clase_III_IV": 0.67,
-                        "clase_I_II": 0.22,
-                        "clase_V_VI": 0.09,
+                        "clase_III_IV": 0.68,
+                        "clase_I_II": 0.20,
+                        "clase_V_VI": 0.10,
                         "clase_VII_VIII": 0.02,
                     }
                 else:
                     probs = {
-                        "clase_I_II": 0.81,
-                        "clase_III_IV": 0.16,
+                        "clase_I_II": 0.83,
+                        "clase_III_IV": 0.14,
                         "clase_V_VI": 0.02,
                         "clase_VII_VIII": 0.01,
                     }
                 top_c = max(probs.items(), key=lambda kv: kv[1])[0]
-                choices[q_key] = _ChoiceResult(
-                    choice=top_c, probabilities=probs, confidence=0.91
-                )
+                choices[q_key] = _ChoiceResult(choice=top_c, probabilities=probs, confidence=0.91)
 
             elif q_key == "limitante_edafica":
-                if is_rocky_serrano or slope_pct >= 2.0 or ls_factor >= 0.8:
+                if is_water_body or is_wetland or is_riparian or flood_p >= 0.50 or jrc >= 20.0:
                     probs = {
-                        "erosion_escorrentia_e": 0.68 if is_rocky_serrano else 0.74,
-                        "salinidad_alcalinidad_s": 0.26 if is_rocky_serrano else 0.06,
-                        "sin_limitante": 0.04 if is_rocky_serrano else 0.16,
-                        "exceso_hidrico_w": 0.02 if is_rocky_serrano else 0.04,
-                    }
-                elif flood_p >= 0.55 or jrc >= 20.0:
-                    probs = {
-                        "exceso_hidrico_w": 0.68,
-                        "salinidad_alcalinidad_s": 0.24,
-                        "erosion_escorrentia_e": 0.04,
+                        "exceso_hidrico_w": 0.72,
+                        "salinidad_alcalinidad_s": 0.18,
+                        "erosion_escorrentia_e": 0.06,
                         "sin_limitante": 0.04,
                     }
-                elif dep >= 0.55:
+                elif is_rocky_serrano or is_steep_piedemonte or slope_pct >= 2.4 or ls_factor >= 0.8:
                     probs = {
-                        "salinidad_alcalinidad_s": 0.52,
-                        "exceso_hidrico_w": 0.38,
-                        "sin_limitante": 0.07,
-                        "erosion_escorrentia_e": 0.03,
+                        "erosion_escorrentia_e": 0.74,
+                        "salinidad_alcalinidad_s": 0.18,
+                        "sin_limitante": 0.05,
+                        "exceso_hidrico_w": 0.03,
+                    }
+                elif is_coast or is_urban or is_bare or dep >= 0.55:
+                    probs = {
+                        "salinidad_alcalinidad_s": 0.64,
+                        "exceso_hidrico_w": 0.20,
+                        "erosion_escorrentia_e": 0.11,
+                        "sin_limitante": 0.05,
                     }
                 else:
                     probs = {
-                        "sin_limitante": 0.79,
-                        "erosion_escorrentia_e": 0.11,
+                        "sin_limitante": 0.80,
+                        "erosion_escorrentia_e": 0.10,
                         "exceso_hidrico_w": 0.07,
                         "salinidad_alcalinidad_s": 0.03,
                     }
                 top_c = max(probs.items(), key=lambda kv: kv[1])[0]
-                choices[q_key] = _ChoiceResult(
-                    choice=top_c, probabilities=probs, confidence=0.90
-                )
+                choices[q_key] = _ChoiceResult(choice=top_c, probabilities=probs, confidence=0.90)
 
     return _SystemOneFallbackResponse(nouls=nouls, scores=scores, choices=choices)
 
@@ -286,9 +346,12 @@ def _build_gemini_system_one_prompt(state: Dict[str, Any], questions: Dict[str, 
             spec["choices"][q_key] = list(criteria_dict.keys())
 
     return (
-        "System One agro-hydrological & INTA soil capability evaluator for Buenos Aires. "
-        "Rule: Steep rocky mountain ridges (pendiente_porcentaje>=8.5 or cota>=310m in Sierras de la Ventana/Tandilia with lithic outcrops) "
-        "are strictly non-arable (aptitud='no_agricola_humedal', clase_inta='clase_VII_VIII', limitante_edafica='erosion_escorrentia_e', resiliencia=0). "
+        "System One global geospatial, hydrological, coastal, fluvial & agronomic evaluator using REAL Copernicus DEM, ESA WorldCover 10m, JRC Water, Sentinel-2 & OSM telemetry. "
+        "Strict rules: "
+        "(1) Open ocean/sea, river/channel/lake bodies (`oceano_mar_abierto`, `cuerpo_agua_abierto`, `cauce_fluvial_rio`, `laguna_cuerpo_agua`), consolidated urban areas (`area_urbana`), and bare sand/rock (`suelo_desnudo_arenal_roca`) are NON-ARABLE: aptitud='no_agricola_humedal', clase_inta='clase_VII_VIII', resiliencia=0. "
+        "(2) Coastal beaches/cliffs (`borde_costero_marino` with low cropland or shore distance <=180m) and permanent wetlands (`humedal_delta`) are non-arable or strictly pastoral. "
+        "(3) Riparian land (`lote_ribereño_fluvial`) carries fluvial flood risk (`mecanismo_hidrico='desborde_cuenca'`). "
+        "(4) Steep mountain ridges (`relieve_serrano_escarpado` or `pendiente_porcentaje>=8.5`) are strictly non-arable (`aptitud='no_agricola_humedal'`, `clase_inta='clase_VII_VIII'`, `limitante_edafica='erosion_escorrentia_e'`, `resiliencia=0`). "
         f"State: {json.dumps(state, ensure_ascii=False)} "
         f"Schema: {json.dumps(spec, ensure_ascii=False)} "
         "Output ONLY raw JSON: "

@@ -14,9 +14,9 @@ logging.basicConfig(
 logger = logging.getLogger("terreno_cultivable_backend")
 
 app = FastAPI(
-    title="Terreno Cultivable API - Buenos Aires",
-    description="Sistema Multiagente con JEV (TypeSafe System One), Rotador de API Keys y Microsoft Planetary Computer STAC",
-    version="1.1.0"
+    title="Terreno Cultivable API - Monitor Geoespacial Satelital",
+    description="Sistema Multiagente con JEV (TypeSafe System One), Rotador de API Keys y Telemetría Satelital Real (Microsoft Planetary Computer STAC + OSM)",
+    version="2.0.0"
 )
 
 # CORS para comunicación con el frontend en Astro
@@ -32,7 +32,7 @@ app.add_middleware(
 async def root():
     rotator_status = key_rotator.get_status()
     return {
-        "app": "Terreno Cultivable API - PBA",
+        "app": "Terreno Cultivable API - Satelital Real",
         "status": "online",
         "docs": "/docs",
         "multiagent": ["GeoExtractorAgent", "HydroRiskAgent", "AgroVerdictAgent"],
@@ -50,7 +50,7 @@ async def health_check():
         "api_key_prefix": mask_api_key(JEV_API_KEY) if JEV_API_KEY else None,
         "gemini_model": GEMINI_MODEL,
         "key_rotator": rotator_status,
-        "region": "Provincia de Buenos Aires, Argentina"
+        "coverage": "Global (Planetary Computer STAC + OSM)"
     }
 
 @app.get("/api/keys/status")
@@ -60,22 +60,18 @@ async def get_keys_status():
 
 @app.get("/api/presets", response_model=list[PresetLocation])
 async def get_presets():
-    """Retorna ubicaciones preconfiguradas con diferentes tipologías hídricas de Bs. As."""
+    """Retorna ubicaciones preconfiguradas representativas de entornos agrícolas, fluviales, costeros, humedales, serranos y urbanos."""
     return PRESET_LOCATIONS
 
 @app.post("/api/analyze", response_model=MultiAgentAnalysisResult)
 async def analyze_parcel(request: AnalyzeRequest):
     """
-    Ejecuta el pipeline multiagente para analizar una coordenada o lote en la Provincia de Buenos Aires.
+    Ejecuta el pipeline multiagente con telemetría satelital real para cualquier coordenada WGS84.
     """
     logger.info(f"Petición de análisis recibida: ({request.lat}, {request.lon}) - '{request.parcel_name}'")
-    
-    # Validar que las coordenadas estén dentro del cono sur / Buenos Aires aproximadamente
-    # Latitud PBA: entre -41.2 y -33.0 aprox
-    # Longitud PBA: entre -63.5 y -56.5 aprox
-    if not (-42.0 <= request.lat <= -32.5 and -64.0 <= request.lon <= -56.0):
-        logger.warning(f"Coordenadas fuera de la región habitual de Bs. As.: ({request.lat}, {request.lon})")
-        # No bloqueamos pero avisamos en logs para permitir pruebas amplias
+
+    if not (-90.0 <= request.lat <= 90.0 and -180.0 <= request.lon <= 180.0):
+        raise HTTPException(status_code=422, detail="Coordenadas WGS84 fuera de rango válido.")
 
     try:
         result = await orchestrator.run(request)
