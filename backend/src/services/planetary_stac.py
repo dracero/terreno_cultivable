@@ -777,7 +777,8 @@ def _analyze_hydro_and_environment(
         env_type = "oceano_mar_abierto"
         env_label = "Océano / Mar Abierto (Sin Suelo Terrestre)"
     elif center_is_water:
-        if coast_detected or (effective_water_pct >= 95.0 and ctx_max_dem <= 2.0 and not lake_detected and has_any_geo):
+        if coast_detected or (effective_water_pct >= 95.0 and ctx_max_dem <= 2.0 and has_any_geo):
+            lake_detected = False
             water_body_type = "mar_costero_estuario"
             env_type = "cuerpo_agua_abierto"
             env_label = "Estuario / Río Ancho o Agua Costera Litoral"
