@@ -1,10 +1,11 @@
 import logging
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from .config import JEV_API_KEY, PORT, HOST
-from .schemas import AnalyzeRequest, MultiAgentAnalysisResult, PresetLocation
-from .presets import PRESET_LOCATIONS
+from .config import GEMINI_MODEL, HOST, JEV_API_KEY, PORT
 from .orchestrator import orchestrator
+from .presets import PRESET_LOCATIONS
+from .schemas import AnalyzeRequest, MultiAgentAnalysisResult, PresetLocation
+from .services.key_rotator import key_rotator, mask_api_key
 
 logging.basicConfig(
     level=logging.INFO,
@@ -14,8 +15,8 @@ logger = logging.getLogger("terreno_cultivable_backend")
 
 app = FastAPI(
     title="Terreno Cultivable API - Buenos Aires",
-    description="Sistema Multiagente con JEV (TypeSafe System One) y Microsoft Planetary Computer STAC",
-    version="1.0.0"
+    description="Sistema Multiagente con JEV (TypeSafe System One), Rotador de API Keys y Microsoft Planetary Computer STAC",
+    version="1.1.0"
 )
 
 # CORS para comunicación con el frontend en Astro
@@ -29,22 +30,33 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
+    rotator_status = key_rotator.get_status()
     return {
         "app": "Terreno Cultivable API - PBA",
         "status": "online",
         "docs": "/docs",
         "multiagent": ["GeoExtractorAgent", "HydroRiskAgent", "AgroVerdictAgent"],
-        "jev_configured": bool(JEV_API_KEY)
+        "jev_configured": rotator_status["total_unique_keys"] > 0 or bool(JEV_API_KEY),
+        "api_keys_pool_size": rotator_status["total_unique_keys"],
+        "gemini_model": GEMINI_MODEL,
     }
 
 @app.get("/api/health")
 async def health_check():
+    rotator_status = key_rotator.get_status()
     return {
         "status": "healthy",
-        "jev_api_key_configured": bool(JEV_API_KEY),
-        "api_key_prefix": JEV_API_KEY[:10] + "..." if JEV_API_KEY else None,
+        "jev_api_key_configured": rotator_status["total_unique_keys"] > 0 or bool(JEV_API_KEY),
+        "api_key_prefix": mask_api_key(JEV_API_KEY) if JEV_API_KEY else None,
+        "gemini_model": GEMINI_MODEL,
+        "key_rotator": rotator_status,
         "region": "Provincia de Buenos Aires, Argentina"
     }
+
+@app.get("/api/keys/status")
+async def get_keys_status():
+    """Retorna el estado en tiempo real del rotador de API keys cargadas desde .env."""
+    return key_rotator.get_status()
 
 @app.get("/api/presets", response_model=list[PresetLocation])
 async def get_presets():

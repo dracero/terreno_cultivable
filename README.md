@@ -35,14 +35,16 @@ El sistema combina datos satelitales abiertos de **Microsoft Planetary Computer 
 La Provincia de Buenos Aires es una de las regiones agroproductivas más importantes del mundo, pero presenta marcadas complejidades topográficas, edáficas e hidrológicas donde **diferencias de apenas 50 centímetros de relieve determinan el éxito o la pérdida total de un cultivo**:
 * **Pendientes mínimas o nulas (Pampa Deprimida):** En la Cuenca del Río Salado las pendientes suelen ser inferiores al $0.1\%$ ($< 1\text{ m/km}$), impidiendo la evacuación rápida de excedentes hídricos y favoreciendo suelos alcalino-sódicos (*Natraquoles* con horizonte $Bt$ nátrico).
 * **Cuencas arreicas y endorreicas (Pampa Arenosa e Interserrana):** Abundancia de cordones medanosos longitudinales, bajos intermedanosos y cubetas de deflación donde el agua drena por infiltración o se acumula formando lagunas temporarias y ascenso de la napa freática.
-* **Erosión hídrica en pendientes (Pampa Ondulada y Sistemas Serranos):** En el norte bonaerense (Pergamino, Arrecifes) y en los piedemontes de Tandilia y Ventania, las pendientes de $0.8\%$ a $>4\%$ generan escorrentía concentrada y pérdida de suelo superficial por erosión laminar y en surcos.
+* **Erosión hídrica en pendientes (Pampa Ondulada y Piedemontes Serranos):** En el norte bonaerense (Pergamino, Arrecifes) y en los piedemontes de Tandilia y Ventania, las pendientes de $0.8\%$ a $5\%$ generan escorrentía concentrada y pérdida de suelo superficial por erosión laminar y en surcos.
+* **Restricción topográfica y lítica en cordones serranos escarpados (Sierras de la Ventana / Crestas de Tandilia):** En el arco plegado del Sistema de Ventania (Cerro Tres Picos, Sierra de la Ventana, Villa Ventana, Curamalal, Pillahuincó; cotas de $360\text{–}800+\text{ msnm}$ y pendientes del $11\%\text{–}26\%$), el basamento cuarcítico paleozoico aflora en superficie o presenta contacto lítico somero ($< 25\text{ cm}$), haciendo que el terreno sea **estrictamente no cultivable (Clases VII–VIII INTA, Subclase `e/s`)** pese a no sufrir anegamiento.
 * **Variabilidad climática extrema:** La alternancia entre fases húmedas (*El Niño*) y secas (*La Niña*) exige conocer el micro-relieve y la posición de la napa freática antes de comprar, arrendar o sembrar un lote.
 
-### ¿Por qué JEV (TypeSafe System One) y no un LLM tradicional?
+### ¿Por qué JEV (TypeSafe System One) + Rotador de API Keys y no un LLM tradicional?
 Los modelos de lenguaje generativos tradicionales generan texto libre no estructurado y sufren de alucinaciones numéricas. **JEV** es un modelo de **System One** entrenado para emitir **juicios rápidos, tipados y matemáticamente calibrados**:
 * Devuelve probabilidades reales ($P \in [0, 1]$) y distribuciones completas sobre opciones competitivas.
 * Integra primitivas estrictas (`Noul`, `Score`, `Choice`) que el código backend consume de forma determinista y segura.
-* Cuenta además con un motor de respaldo hidro-edáfico calibrado en `jev_service.py` para garantizar disponibilidad continua ante fallos de conectividad externa.
+* **Rotador Multi-Clave Anti-503/409 (`key_rotator.py`):** Lee múltiples claves desde `.env` (separadas por comas, punto y coma o saltos de línea, con recarga en caliente por `mtime`), balancea peticiones mediante *Round-Robin* priorizando claves sin vuelos concurrentes (`in_flight == 0` para evitar `409 Conflict`), y aplica *exponential backoff* con *jitter* ante respuestas `503 Service Unavailable`, `409 Conflict` o `429 Rate Limit`.
+* Cuenta además con un motor de respaldo hidro-edáfico y topográfico calibrado en `jev_service.py` para garantizar disponibilidad continua ($< 2.5\text{ s}$) ante saturación externa.
 
 ---
 
@@ -135,12 +137,21 @@ Para cada lote auditado se calculan 6 indicadores técnicos fundamentales:
 6. **Taxonomía Edáfica Estimada (INTA):**
    Identifica el Gran Grupo taxonómico representativo de la subregión (*Argiudol típico*, *Natraquol típico / Natracualf*, *Hapludol éntico / thapto-árgico*, *Hapludol lítico / petrocálcico*).
 
-### 3.4. Zonificación por Ambientes Productivos (Agricultura de Precisión)
-Segmenta automáticamente la superficie total del lote (`area_ha`) en los **4 ambientes clásicos de manejo por ambientes**:
+### 3.4. Zonificación por Ambientes Productivos (Agricultura de Precisión y Relieve Serrano)
+Segmenta automáticamente la superficie total del lote (`area_ha`) en **4 ambientes geomorfológicos**, adaptando la semántica según se trate de **llanura/piedemonte** o de un **macizo serrano escarpado (`serrano_escarpado`)**:
+
+**En Llanura Pampeana y Piedemontes Agrícolas:**
 * 🟢 **Loma Alta Bien Drenada:** Suelo profundo y aireado, apto para cultivos exigentes (Maíz temprano, Soja 1ª, Trigo) con alta respuesta a fertilización.
 * 🔵 **Media Loma de Transición:** Posición intermedia con excelente provisión de agua útil en años secos y buen drenaje en años normales.
 * 🟡 **Bajo Tendido / Bajo Dulce:** Zona receptora de escorrentía con napa cercana; apta para cultivos tolerantes (Sorgo, Maíz tardío) o pasturas consociadas.
 * 🔴 **Bajo Inundable / Cubeta Alcalina:** Depresión de acumulación hídrica o alcalinidad sódica (*horizonte Bt nátrico*); uso exclusivo ganadero (*Agropiro*, *Lotus tenuis*) o reserva hídrica.
+
+**En Cordones Serranos Escarpados (Sierras de la Ventana / Crestas de Tandilia):**
+En macizos plegados con pendientes $> 8.5\%$ o cotas $> 310\text{ msnm}$, la relación altitud-aptitud se invierte (las cumbres son roca desnuda y sólo el pie coluvial acumula sedimento):
+* 🔴 **Cumbre y Afloramiento Rocoso Cuarcítico (Cotas superiores):** Roca paleozoica aflorante sin desarrollo edáfico útil ($< 10\text{–}15\text{ cm}$). No cultivable (**Clase VIII INTA**).
+* 🟡 **Ladera Serrana Escarpada (Media-alta ladera):** Fuerte pendiente ($> 10\%$), escorrentía torrencial y suelo lítico somero ($< 25\text{ cm}$). Inapto para laboreo agrícola (**Clases VI–VII INTA**).
+* 🔵 **Faldeo Periserrano Tendido:** Ladera inferior con contacto lítico/petrocálcico somero ($30\text{–}50\text{ cm}$); uso ganadero extensivo controlado.
+* 🟢 **Piedemonte Coluvial (Valle Serrano):** Sector basal de acumulación coluvial apto únicamente para pasturas o verdeos en contorno.
 
 ### 3.5. Exportación Cartográfica GeoJSON para SIG (QGIS / ArcGIS)
 El botón **`⬇️ Exportar GeoJSON Topográfico`** genera y descarga en el navegador un archivo estándar `.geojson` (`FeatureCollection`) que incluye:
@@ -200,8 +211,9 @@ El sistema divide el procesamiento en tres agentes especializados y secuenciales
   5. **`Noul` (`requiere_obras`)**: Probabilidad de requerir obras de drenaje, micro-canalización o curvas de nivel.
   6. **`Noul` (`manejo_ambientes`)**: Probabilidad de que la heterogeneidad del lote justifique **Agricultura de Precisión / Manejo Variable por Ambientes**.
 * **Cálculo del Score Agrícola ($0\text{–}100$) e Índice de Productividad INTA ($\text{IP } 0\text{–}100$):**
-  $$\text{Score} = \text{Base}(\text{Aptitud}) - (30 \times P_{\text{inundación}}) + (8 \times \text{Resiliencia})$$
+  $$\text{Score} = \text{Base}(\text{Aptitud}) - (30 \times P_{\text{inundación}}) - \text{Penalización}_{\text{Topo/Lítica}} + (8 \times \text{Resiliencia})$$
   $$\text{IP}_{\text{INTA}} = 0.72 \times \text{Score} + 0.28 \times (\%\text{Loma Alta} + \%\text{Media Loma})$$
+  *(En cordones serranos rocosos escarpados con pendiente $\ge 8.5\%$ o cota $\ge 310\text{ msnm}$, se aplica salvaguarda determinista **Clases VII–VIII / No Cultivable** con $\text{IP}_{\text{INTA}} \le 18$).*
 * **Salida Tipada:** `AgroVerdict`.
 
 ### Orquestador Asíncrono (`MultiAgentOrchestrator`)
@@ -214,7 +226,7 @@ El sistema divide el procesamiento en tres agentes especializados y secuenciales
 
 La interfaz web (`frontend/src/`) está organizada en 4 paneles interactivos con estética *Glassmorphism*:
 1. **`MapViewer.astro` (Visor Cartográfico Satelital y Topográfico):**
-   * Selector de 5 zonas testigo de la Provincia de Buenos Aires + entradas de Nombre, Latitud, Longitud y **Superficie en hectáreas (`ha`)**.
+   * Selector de 6 zonas testigo de la Provincia de Buenos Aires (incluyendo **Chascomús**, **Pergamino**, **Pehuajó**, **Dolores**, **Tandil Piedemonte** y **Sierra de la Ventana**) + entradas de Nombre, Latitud, Longitud y **Superficie en hectáreas (`ha`)**.
    * Conmutador de modo de interacción: **`📍 Auditar Lote`** vs. **`📏 Trazar Corte Topográfico (A → B)`**.
    * Panel flotante de capas vectoriales y satelitales:
      * `〰️ Curvas de Nivel (Isolíneas)` con etiquetas de altitud en $\text{msnm}$.
@@ -225,12 +237,12 @@ La interfaz web (`frontend/src/`) está organizada en 4 paneles interactivos con
 2. **`TopoStudyPanel.astro` (Laboratorio Topográfico, Geomorfológico y de Ambientes):**
    * **Gráfico SVG Interactivo de Corte Topográfico:** Pestañas para alternar entre `Corte N → S`, `Corte O → E`, `Eje NO → SE` y `Corte Libre A → B`, graficando cota superficial + nivel freático y sincronizando una sonda en vivo con el mapa.
    * **6 Tarjetas de Índices Geomorfológicos y Edáficos:** $\text{TWI}$, $\text{TPI}$, Pendiente y *Aspect*, Factor de Erosión $LS$ y $\text{TRI}$, Profundidad de Napa Freática y Taxonomía INTA.
-   * **Distribución de Ambientes Productivos:** Barra apilada proporcional y tarjetas detalladas con porcentaje, hectáreas estimadas, cota media y recomendación de uso para Loma Alta, Media Loma, Bajo Dulce y Bajo Inundable.
+   * **Distribución de Ambientes Productivos:** Barra apilada proporcional y tarjetas detalladas con porcentaje, hectáreas estimadas, cota media y recomendación de uso adaptada a llanura o relieve serrano.
    * **Botón `⬇️ Exportar GeoJSON Topográfico`.**
 3. **`AgentMonitor.astro` (Monitor en Tiempo Real de los 3 Agentes):**
    * Muestra el estado de ejecución, cota y amplitud $\Delta H$, pendiente en $^\circ$ y $\%$, barra de probabilidad `Noul`, Capacidad de Uso INTA y Subclase limitante.
 4. **`VerdictPanel.astro` (Dictamen Ejecutivo y Recomendaciones):**
-   * Medidor circular animado (`0–100`), semáforo de riesgo, píldoras de **Capacidad INTA**, **Subclase Limitante** e **Índice de Productividad (IP)**, chips de cultivos recomendados, pautas de sistematización y botón **`📋 Copiar Informe`** técnico completo.
+   * Medidor circular animado (`0–100`), semáforo contextual (distinguiendo restricción hídrica vs. restricción por roca y pendiente), píldoras de **Capacidad INTA**, **Subclase Limitante** e **Índice de Productividad (IP)**, chips de cultivos recomendados, pautas de sistematización y botón **`📋 Copiar Informe`** técnico completo.
 
 ---
 
@@ -238,7 +250,7 @@ La interfaz web (`frontend/src/`) está organizada en 4 paneles interactivos con
 
 ```text
 terreno_cultivable/
-├── .env                              # Variable JEV_API_KEY
+├── .env                              # Pool de claves GEMINI_API_KEY / JEV_API_KEY (ignorado en git)
 ├── package.json                      # Scripts raíz para iniciar Backend + Frontend con un comando
 ├── README.md                         # Documentación técnica integral
 │
@@ -247,21 +259,23 @@ terreno_cultivable/
 │   ├── uv.lock                       # Lockfile determinista
 │   └── src/
 │       ├── __init__.py
-│       ├── main.py                   # Aplicación FastAPI y endpoints REST (/api/analyze, /api/presets)
-│       ├── config.py                 # Configuración y carga de variables de entorno
+│       ├── main.py                   # Aplicación FastAPI (/api/analyze, /api/presets, /api/keys/status)
+│       ├── config.py                 # Configuración y parser multi-key desde .env
 │       ├── schemas.py                # Modelos Pydantic (Topografía, Perfiles, Geomorfo, Agentes)
 │       ├── presets.py                # Ubicaciones testigo de la Provincia de Buenos Aires
 │       ├── orchestrator.py           # Orquestador asíncrono del pipeline de 3 agentes
 │       ├── services/
-│       │   ├── planetary_stac.py     # Consulta STAC y teselas dinámicas de Microsoft Planetary Computer
+│       │   ├── planetary_stac.py     # Consulta STAC y modelado geomorfológico regional PBA
 │       │   ├── topography_engine.py  # Motor DEM 17x17, Marching Squares, Flujo D8, Cortes e Índices
-│       │   └── jev_service.py        # Cliente JEV System One + motor calibrado de respaldo
+│       │   ├── key_rotator.py        # Rotador de API Keys Round-Robin con cooldown anti-503/409
+│       │   └── jev_service.py        # Cliente JEV System One + failover multi-key + respaldo calibrado
 │       └── agents/
 │           ├── geo_extractor.py      # Agente 1: Extractor Satelital STAC + Topografía DEM
 │           ├── hydro_risk.py         # Agente 2: Riesgo Hidrológico con JEV
 │           └── agro_verdict.py       # Agente 3: Capacidad de Uso INTA y Dictamen Agronómico con JEV
 │
 └── frontend/                         # Aplicación Web moderna con Astro + Leaflet
+    ├── README.md                     # Documentación de componentes y arquitectura del frontend
     ├── package.json                  # Dependencias (astro, leaflet)
     ├── astro.config.mjs              # Configuración de Astro
     └── src/
@@ -286,7 +300,7 @@ terreno_cultivable/
 ### Prerrequisitos
 * **Python 3.12+** y el gestor **`uv`** instalado (`curl -LsSf https://astral.sh/uv/install.sh | sh`).
 * **Node.js 20+** y **`npm`**.
-* Una clave API de TypeSafe (`JEV_API_KEY`) configurada en `.env` (si no se dispone de conexión o la clave expira, el sistema activa automáticamente su motor biofísico calibrado de respaldo).
+* Archivo `.env` en la raíz con una o múltiples claves separadas por comas en `GEMINI_API_KEY` o `JEV_API_KEY` (el rotador `key_rotator.py` balancea automáticamente las claves y activa el motor biofísico calibrado de respaldo si todas entran en enfriamiento).
 
 ### Paso 1: Instalar Dependencias (Primera vez)
 ```bash
@@ -299,31 +313,33 @@ Desde la **raíz del proyecto**, ejecuta:
 npm run dev
 ```
 Este comando levanta concurrentemente:
-1. **Backend FastAPI**: `http://localhost:8000` (Documentación interactiva Swagger en `http://localhost:8000/docs`)
-2. **Frontend Astro**: `http://localhost:4321`
+1. **Backend FastAPI**: `http://localhost:8000` (Swagger en `http://localhost:8000/docs` y estado del pool de claves en `http://localhost:8000/api/keys/status`)
+2. **Frontend Astro**: `http://localhost:4321` (o `http://localhost:3000`)
 
 ---
 
 ## 9. Casos de Estudio Reales en Buenos Aires
 
-| Indicador / Métrica | Caso A: Chascomús (Cuenca del Salado) | Caso B: Pergamino (Zona Núcleo) | Caso C: Pehuajó (Pampa Arenosa) | Caso D: Tandil (Sistema Serrano) |
-| :--- | :--- | :--- | :--- | :--- |
-| **Coordenadas** | `-35.5765, -58.0125` | `-33.8920, -60.5730` | `-35.8115, -61.8950` | `-37.3210, -59.1330` |
-| **Unidad Geomorfológica** | Pampa Deprimida / Cuenca Baja del Salado | Pampa Ondulada (Zona Núcleo Norte) | Pampa Arenosa (Oeste Bonaerense) | Sistema Serrano de Tandilia |
-| **Taxonomía Edáfica INTA** | *Natraquol típico / Natracualf* (Bt nátrico) | *Argiudol típico* (Serie Pergamino) | *Hapludol éntico / thapto-árgico* | *Argiudol típico / Hapludol lítico* |
-| **Cota y Amplitud ($\Delta H$)** | `18.2–20.0 msnm` ($\Delta H = 1.81\text{ m}$) | `54.5–73.3 msnm` ($\Delta H = 18.89\text{ m}$) | `91.6–97.3 msnm` ($\Delta H = 5.72\text{ m}$) | `325.6–428.4 msnm` ($\Delta H = 102.8\text{ m}$) |
-| **Pendiente Media** | `0.05°` (`0.10%`) | `0.70°` (`0.71%`) | `0.21°` (`0.43%`) | `3.50°` (`4.15%`) |
-| **Equidistancia Curvas** | `0.25 m` | `1.0 m` | `0.5 m` | `5.0 m` |
-| **Índice Humedad ($\text{TWI}$)** | `17.39` (Saturación severa) | `11.53` (Humedad equilibrada) | `13.46` (Acumulación en bajos) | `9.66` (Drenaje rápido) |
-| **Factor Erosión ($\text{USLE } LS$)** | `0.11` (Nulo) | `0.15` (Bajo) | `0.13` (Bajo) | `0.85` (Moderado-Alto) |
-| **Napa Freática Estimada** | `0.70 m` (Muy superficial) | `4.27 m` (Profunda y segura) | `1.07 m` (Cercana en bajos) | `8.08 m` (Profunda) |
-| **Distribución de Ambientes** | `51.9%` Bajo Inundable / `26.0%` Bajo Dulce | `43.3%` Loma Alta / `40.1%` Media Loma | `27.0%` Media Loma / `54.6%` Bajos | `33.9%` Loma Alta / `48.8%` Media Loma |
-| **Capacidad de Uso INTA** | **Clases VII – VIII** (`Subclase w`) | **Clases I – II** (`Subclase 0`) | **Clases III – IV** (`Subclase s`) | **Clases III – IV** (`Subclase e`) |
-| **Score Agrícola / IP INTA** | **5 / 100** (`IP 10` · Rojo) | **98 / 100** (`IP 94` · Verde) | **65 / 100** (`IP 59` · Amarillo) | **98 / 100** (`IP 94` · Verde) |
+| Indicador / Métrica | Caso A: Chascomús (Cuenca del Salado) | Caso B: Pergamino (Zona Núcleo) | Caso C: Pehuajó (Pampa Arenosa) | Caso D: Tandil (Piedemonte Serrano) | Caso E: Sierra de la Ventana (Cordón Serrano) |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Coordenadas** | `-35.5765, -58.0125` | `-33.8920, -60.5730` | `-35.8115, -61.8950` | `-37.3210, -59.1330` | `-38.1450, -61.9750` |
+| **Unidad Geomorfológica** | Pampa Deprimida / Cuenca Baja del Salado | Pampa Ondulada (Zona Núcleo Norte) | Pampa Arenosa (Oeste Bonaerense) | Sistema Serrano de Tandilia (Piedemonte) | Sistema Serrano de Ventania (Cordón Escarpado) |
+| **Taxonomía Edáfica INTA** | *Natraquol típico / Natracualf* (Bt nátrico) | *Argiudol típico* (Serie Pergamino) | *Hapludol éntico / thapto-árgico* | *Argiudol típico / Hapludol lítico* | *Afloramiento Rocoso Cuarcítico / Hapludol Lítico (<25 cm)* |
+| **Cota Media ($\text{msnm}$)** | `19.3 msnm` ($\Delta H = 1.81\text{ m}$) | `63.7 msnm` ($\Delta H = 18.89\text{ m}$) | `94.5 msnm` ($\Delta H = 5.72\text{ m}$) | `224.0 msnm` ($\Delta H = 53.8\text{ m}$) | `765.1 msnm` ($\Delta H = 319.8\text{ m}$) |
+| **Pendiente Media** | `0.09°` (`0.10%`) | `0.89°` (`0.71%`) | `0.23°` (`0.43%`) | `1.94°` (`1.83%`) | `14.50°` (`11.09%`) |
+| **Equidistancia Curvas** | `0.25 m` | `1.0 m` | `0.5 m` | `5.0 m` | `10.0 m` |
+| **Factor Erosión ($\text{USLE } LS$)** | `0.11` (Nulo) | `0.15` (Bajo) | `0.13` (Bajo) | `0.33` (Bajo-Moderado) | `3.17` (Crítico / No arable) |
+| **Napa Freática Estimada** | `0.70 m` (Muy superficial) | `4.27 m` (Profunda y segura) | `1.07 m` (Cercana en bajos) | `8.50 m` (Profunda) | `14.0 m` (Basamento rocoso) |
+| **Capacidad de Uso INTA** | **Clases VII – VIII** (`Subclase w`) | **Clases I – II** (`Subclase 0`) | **Clases V – VI** (`Subclase w`) | **Clases I – II** (`Subclase 0`) | **Clases VII – VIII** (`Subclase e/s · Roca <25 cm`) |
+| **Dictamen de Aptitud** | No Cultivable (Reserva Hídrica) | Apto Agricultura Continua | Apto Ganadería de Cría | Apto Agricultura Continua | No Cultivable (Afloramiento Rocoso / Serrano) |
+| **Score Agrícola / IP INTA** | **5 / 100** (`IP 10` · Rojo 🔴) | **98 / 100** (`IP 94` · Verde 🟢) | **38 / 100** (`IP 39` · Amarillo 🟡) | **98 / 100** (`IP 92` · Verde 🟢) | **5 / 100** (`IP 4` · Rojo 🔴) |
 
 ---
 
 ## 10. Especificación de la API REST
+
+### `GET /api/keys/status`
+Devuelve el estado en tiempo real del **API Key Rotator** (claves enmascaradas, disponibilidad, vuelos activos `in_flight`, enfriamientos por `503`/`409`/`429` y contadores de éxito/error).
 
 ### `POST /api/analyze`
 Ejecuta el pipeline multiagente y el motor topográfico para una coordenada y superficie en hectáreas.

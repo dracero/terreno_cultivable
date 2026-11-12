@@ -382,6 +382,14 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
     function renderTopographicMapOverlays(topo) {
       if (!map || !topo) return;
 
+      if (Array.isArray(topo.terrain_zones)) {
+        topo.terrain_zones.forEach(z => {
+          if (z.zone_id && z.zone_name) {
+            ZONE_LABELS[z.zone_id] = z.zone_name;
+          }
+        });
+      }
+
       contourGroup.clearLayers();
       flowGroup.clearLayers();
       zonesGroup.clearLayers();
@@ -884,7 +892,11 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
 
         // Agente 3 Completado (JEV Dictamen Agronómico + INTA)
         status3.className = "status-pill status-done"; status3.textContent = "JEV Dictamen";
-        document.getElementById('val-aptitud-tag').textContent = data.verdict.aptitud_productiva_label;
+        const aptitudTagEl = document.getElementById('val-aptitud-tag');
+        aptitudTagEl.textContent = data.verdict.aptitud_productiva_label;
+        aptitudTagEl.style.color = data.verdict.color_semaforo === 'verde'
+          ? '#34d399'
+          : (data.verdict.color_semaforo === 'amarillo' ? '#fbbf24' : '#fb7185');
         document.getElementById('val-clase-inta').textContent = data.verdict.clase_capacidad_uso_label;
         document.getElementById('val-limitante-inta').textContent = data.verdict.limitante_edafica_label;
         document.getElementById('val-resiliencia').textContent = data.verdict.resiliencia_climatica_label;
@@ -900,6 +912,8 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
         scoreCircle.style.strokeDashoffset = offset;
 
         const badgeSemaforo = document.getElementById('badge-semaforo');
+        const isErosionOrLithic = data.verdict.limitante_edafica_codigo === 'erosion_escorrentia_e'
+          || (data.geospatial?.slope_pct >= 5.0);
         if (data.verdict.color_semaforo === 'verde') {
           scoreCircle.style.stroke = '#10b981';
           badgeSemaforo.className = "badge badge-agri";
@@ -907,11 +921,15 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
         } else if (data.verdict.color_semaforo === 'amarillo') {
           scoreCircle.style.stroke = '#f59e0b';
           badgeSemaforo.className = "badge badge-warning";
-          badgeSemaforo.textContent = "Aptitud Mixta / Alerta Hídrica";
+          badgeSemaforo.textContent = isErosionOrLithic
+            ? "Aptitud Restringida / Pendiente y Tosca"
+            : "Aptitud Mixta / Alerta Hídrica";
         } else {
           scoreCircle.style.stroke = '#ef4444';
           badgeSemaforo.className = "badge badge-danger";
-          badgeSemaforo.textContent = "No Cultivable / Alto Riesgo";
+          badgeSemaforo.textContent = isErosionOrLithic
+            ? "No Cultivable / Roca y Pendiente"
+            : "No Cultivable / Alto Riesgo Hídrico";
         }
 
         document.getElementById('verdict-title').textContent = data.verdict.aptitud_productiva_label;

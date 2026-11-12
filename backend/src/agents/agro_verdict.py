@@ -82,10 +82,10 @@ class AgroVerdictAgent:
                     "¿cuál es la aptitud de uso agropecuario más viable y sustentable para este lote?"
                 ),
                 criteria={
-                    "agricola_plena": "Apto agricultura continua (soja, maíz, trigo/cebada, girasol)",
+                    "agricola_plena": "Apto agricultura continua (soja, maíz, trigo/cebada, girasol) en suelos profundos y pendientes suaves",
                     "mixto_agricola_ganadero": "Apto rotación agrícola-ganadera con pasturas consociadas",
-                    "ganadero_pastizal_bajos": "Apto ganadería de cría sobre pastizales naturales o promocionados",
-                    "no_agricola_humedal": "Inapto para laboreo agrícola / espejo de agua o bajo permanente"
+                    "ganadero_pastizal_bajos": "Apto exclusivamente ganadería de cría sobre pastizales naturales (bajos o faldeos serranos con tosca somera)",
+                    "no_agricola_humedal": "Inapto para laboreo agrícola por afloramiento rocoso serrano escarpado (pendiente > 8.5%, suelo lítico < 25 cm), cuerpo de agua o humedal permanente"
                 }
             ),
             "clase_inta": Choice(
@@ -96,8 +96,8 @@ class AgroVerdictAgent:
                 criteria={
                     "clase_I_II": "Clases I y II: Tierras arables excelentes con suelos profundos, bien drenados y sin limitaciones severas",
                     "clase_III_IV": "Clases III y IV: Tierras arables con limitaciones moderadas a fuertes (drenaje lento, riesgo de erosión o sequía estacional) que exigen prácticas conservacionistas",
-                    "clase_V_VI": "Clases V y VI: Tierras no arables o marginales por anegamiento frecuente, alcalinidad sódica en bajos o pendiente; aptas para pasturas y ganadería",
-                    "clase_VII_VIII": "Clases VII y VIII: Humedales permanentes, lagunas, cubetas severas o afloramientos rocosos sin aptitud agropecuaria convencional"
+                    "clase_V_VI": "Clases V y VI: Tierras no arables o marginales por anegamiento frecuente, alcalinidad sódica en bajos o pendiente pronunciada; aptas para pasturas y ganadería",
+                    "clase_VII_VIII": "Clases VII y VIII: Humedales permanentes, lagunas, cubetas severas o afloramientos rocosos serranos escarpados sin aptitud agrícola"
                 }
             ),
             "limitante_edafica": Choice(
@@ -107,15 +107,15 @@ class AgroVerdictAgent:
                 criteria={
                     "sin_limitante": "Sin limitaciones edáficas ni topográficas relevantes (suelo profundo y equilibrado)",
                     "exceso_hidrico_w": "Limitación por exceso de agua (w): drenaje impedido, encharcamiento o napa freática alta",
-                    "erosion_escorrentia_e": "Limitación por erosión (e): pendiente pronunciada con riesgo de escorrentía y pérdida de suelo superficial",
-                    "salinidad_alcalinidad_s": "Limitación en la zona radicular (s): alcalinidad sódica (horizonte Bt nátrico), baja retención o tosca somera"
+                    "erosion_escorrentia_e": "Limitación por erosión y pendiente (e): pendiente pronunciada o relieve serrano escarpado con riesgo severo de escorrentía",
+                    "salinidad_alcalinidad_s": "Limitación en la zona radicular (s): alcalinidad sódica (horizonte Bt nátrico), contacto lítico rocoso o tosca somera"
                 }
             ),
             "resiliencia": Score(
                 instructions="¿Qué nivel de resiliencia y estabilidad productiva tiene el campo frente a la alternancia Niño/Niña?",
                 criteria=[
-                    "Muy vulnerable con alto riesgo de pérdida de cosecha en años húmedos",
-                    "Resiliencia media manejable mediante ajuste de ciclos y drenaje superficial",
+                    "Muy vulnerable con alto riesgo de pérdida de cosecha o sin capacidad de retención edáfica (roca somera / anegamiento)",
+                    "Resiliencia media manejable mediante ajuste de ciclos y prácticas conservacionistas",
                     "Alta resiliencia con excelente estabilidad productiva interanual"
                 ]
             ),
@@ -132,46 +132,99 @@ class AgroVerdictAgent:
 
         response = await jev_service.evaluate_system_one(synthesized_state, questions)
 
+        is_rocky_serrano = (
+            geom.slope_pct >= 8.5
+            or (geo_state.elevation_m >= 310.0 and geom.slope_pct >= 5.5)
+            or "Afloramiento Rocoso" in geom.soil_taxonomy_inta
+        )
+        is_steep_piedemonte = (not is_rocky_serrano) and (
+            geom.slope_pct >= 5.0
+            or (geo_state.elevation_m >= 245.0 and geom.slope_pct >= 3.8)
+        )
+
         # Extracción tipada
         choice_obj = response.choices["aptitud"]
         aptitud_key = str(choice_obj.choice)
-        aptitud_label = APTITUD_LABELS.get(aptitud_key, aptitud_key)
         aptitud_probs = {k: round(v, 3) for k, v in choice_obj.probabilities.items()}
 
         clase_key = str(response.choices["clase_inta"].choice)
-        clase_label = CLASE_INTA_LABELS.get(clase_key, clase_key)
-
         limitante_key = str(response.choices["limitante_edafica"].choice)
-        limitante_label = LIMITANTE_LABELS.get(limitante_key, limitante_key)
 
         resiliencia_val = int(round(response.scores["resiliencia"].score))
         resiliencia_val = max(0, min(2, resiliencia_val))
-        resiliencia_label = RESILIENCIA_LABELS.get(resiliencia_val, "Moderada")
 
         requiere_obras_prob = round(response.nouls["requiere_obras"].noul, 3)
-        requiere_obras = requiere_obras_prob >= 0.5
-
         manejo_amb_prob = round(response.nouls["manejo_ambientes"].noul, 3)
+
+        # Salvaguarda biofísica determinista para cordones serranos rocosos (Sierras de la Ventana / Crestas de Tandilia)
+        if is_rocky_serrano:
+            aptitud_key = "no_agricola_humedal"
+            aptitud_probs = {
+                "no_agricola_humedal": 0.81,
+                "ganadero_pastizal_bajos": 0.15,
+                "mixto_agricola_ganadero": 0.03,
+                "agricola_plena": 0.01,
+            }
+            clase_key = "clase_VII_VIII"
+            limitante_key = "erosion_escorrentia_e"
+            resiliencia_val = 0
+            requiere_obras_prob = min(requiere_obras_prob, 0.25)
+        elif is_steep_piedemonte:
+            if aptitud_key == "agricola_plena":
+                aptitud_key = "ganadero_pastizal_bajos" if geom.slope_pct >= 6.2 else "mixto_agricola_ganadero"
+            if clase_key in ("clase_I_II", "clase_III_IV") and geom.slope_pct >= 5.5:
+                clase_key = "clase_V_VI"
+            if limitante_key == "sin_limitante":
+                limitante_key = "erosion_escorrentia_e"
+            resiliencia_val = min(resiliencia_val, 1)
+
+        aptitud_label = APTITUD_LABELS.get(aptitud_key, aptitud_key)
+        clase_label = CLASE_INTA_LABELS.get(clase_key, clase_key)
+        limitante_label = LIMITANTE_LABELS.get(limitante_key, limitante_key)
+        resiliencia_label = RESILIENCIA_LABELS.get(resiliencia_val, "Moderada")
+
+        if is_rocky_serrano:
+            aptitud_label = "No Cultivable (Afloramiento Rocoso / Relieve Serrano Escarpado)"
+            clase_label = "Clases VII – VIII (Afloramiento rocoso / Reserva serrana no arable)"
+            limitante_label = "Subclase e/s · Pendiente escarpada y contacto lítico rocoso (<25 cm)"
+            resiliencia_label = "Nula aptitud arable (Suelo lítico somero y escorrentía torrencial)"
+        elif is_steep_piedemonte and aptitud_key == "ganadero_pastizal_bajos":
+            aptitud_label = "Apto Ganadería Serrana Extensiva (Pastizal Natural de Faldeo)"
+            limitante_label = "Subclase e/s · Pendiente pronunciada y tosca/roca somera (35–60 cm)"
+
+        requiere_obras = requiere_obras_prob >= 0.5
         manejo_amb = manejo_amb_prob >= 0.45
 
-        # Cálculo del Score de Aptitud Agrícola (0 - 100)
+        # Cálculo del Score de Aptitud Agrícola (0 - 100) integrando riesgo hídrico + restricción topográfica/lítica
         base_score = 95 if aptitud_key == "agricola_plena" else (
             68 if aptitud_key == "mixto_agricola_ganadero" else (
-                38 if aptitud_key == "ganadero_pastizal_bajos" else 10
+                46 if aptitud_key == "ganadero_pastizal_bajos" else 10
             )
         )
         penalty_risk = int(hydro_profile.riesgo_inundacion_severo_prob * 30)
-        resilience_bonus = resiliencia_val * 8
-        final_score = max(5, min(98, base_score - penalty_risk + resilience_bonus))
+        penalty_topo_edafico = 0
+        if is_rocky_serrano:
+            penalty_topo_edafico = min(35, int(max(0.0, geom.slope_pct - 4.0) * 2.5))
+        elif is_steep_piedemonte:
+            penalty_topo_edafico = min(22, int(max(0.0, geom.slope_pct - 3.5) * 3.0))
+
+        resilience_bonus = 0 if is_rocky_serrano else (resiliencia_val * 8)
+        final_score = max(
+            5,
+            min(98, base_score - penalty_risk - penalty_topo_edafico + resilience_bonus),
+        )
 
         # Índice Cartográfico de Productividad INTA estimado (IP 0-100)
         loma_media_pct = zones_pct.get("loma_alta", 25.0) + zones_pct.get("media_loma", 25.0)
-        ip_inta = int(round(max(4.0, min(96.0, final_score * 0.72 + loma_media_pct * 0.28))))
+        if is_rocky_serrano:
+            ip_inta = int(round(max(4.0, min(18.0, final_score * 0.85))))
+        else:
+            ip_inta = int(round(max(4.0, min(96.0, final_score * 0.72 + loma_media_pct * 0.28))))
 
         # Semáforo
         if final_score >= 75:
             color = "verde"
-        elif final_score >= 45:
+        elif final_score >= 30:
             color = "amarillo"
         else:
             color = "rojo"
@@ -194,24 +247,48 @@ class AgroVerdictAgent:
         elif aptitud_key == "mixto_agricola_ganadero":
             dictamen = (
                 f"Lote de aptitud mixta ({final_score}/100 · IP INTA ~{ip_inta}). "
-                f"Clasificado en {clase_label}. Permite agricultura en lomas ({zones_pct.get('loma_alta', 0)}%) y pasturas en bajos tendidos."
+                f"Clasificado en {clase_label}. Permite agricultura conservacionista en sectores tendidos ({zones_pct.get('loma_alta', 0)}%) y pasturas perennes en faldeos/bajos."
             )
-            cultivos = ["Maíz tardío", "Sorgo granífero/forrajero", "Pasturas de Alfalfa / Festuca", "Avena / Vicia"]
+            cultivos = ["Trigo / Cebada en contorno", "Girasol", "Pasturas de Alfalfa / Festuca", "Avena / Vicia"]
             recomendaciones = [
-                "Zonificar el lote separando el manejo de Lomas (agrícola) de los Bajos Dulces (forrajero).",
-                "Priorizar cultivos con tolerancia a períodos cortos de saturación (Sorgo, Maíz tardío).",
-                "Evitar tránsito de maquinaria pesada en bajos cuando el perfil supere capacidad de campo."
+                "Zonificar el lote separando los sectores de suelo profundo (agrícola) de las laderas someras o bajos (forrajero).",
+                "Sembrar en contorno cortando la pendiente principal para mitigar escorrentía y pérdida de suelo.",
+                "Evitar barbechos desnudos manteniendo cobertura viva o rastrojo anclado todo el año."
             ]
         elif aptitud_key == "ganadero_pastizal_bajos":
+            if is_steep_piedemonte or geom.slope_pct >= 4.0:
+                dictamen = (
+                    f"Lote con fuerte restricción topográfica y edáfica para agricultura anual ({final_score}/100 · IP INTA ~{ip_inta}). "
+                    f"Corresponde a {clase_label} ({limitante_label}) con pendiente de {geom.slope_pct}%. Apto únicamente para ganadería sobre pastizal serrano o pasturas perennes."
+                )
+                cultivos = ["Pastizal natural serrano", "Festuca arundinacea", "Pastura consociada perenne", "Verdeo de Avena en contorno"]
+                recomendaciones = [
+                    "Evitar agricultura anual en pendientes > 5% con tosca o roca somera para impedir erosión irreversible del horizonte A.",
+                    "Manejar carga animal rotativa preservando un remanente herbáceo que amortigüe la escorrentía.",
+                    "En sectores de piedemonte suave, implantar pasturas perennes siguiendo estrictamente las curvas de nivel."
+                ]
+            else:
+                dictamen = (
+                    f"Lote con restricción para agricultura anual ({final_score}/100 · IP INTA ~{ip_inta}). "
+                    f"Corresponde a {clase_label} ({limitante_label}). Óptimo para ganadería sobre pasturas adaptadas."
+                )
+                cultivos = ["Lotus tenuis / corniculatus", "Agropiro alargado", "Festuca arundinacea", "Melilotus alba"]
+                recomendaciones = [
+                    "Evitar laboreo convencional para no degradar el horizonte superficial ni ascender sales.",
+                    "Implantar Agropiro alargado y Lotus tenuis en los bajos alcalinos/hidromórficos.",
+                    "Planificar apotreramiento respetando las curvas de nivel para separar lomas de reserva forrajera."
+                ]
+        elif is_rocky_serrano:
             dictamen = (
-                f"Lote con restricción para agricultura anual ({final_score}/100 · IP INTA ~{ip_inta}). "
-                f"Corresponde a {clase_label} ({limitante_label}). Óptimo para ganadería sobre pasturas adaptadas."
+                f"Terreno NO CULTIVABLE por restricción topográfica y lítica severa ({final_score}/100 · IP INTA ~{ip_inta}). "
+                f"Macizo serrano escarpado (cota {geo_state.elevation_m} msnm, pendiente {geom.slope_pct}%, Factor LS={geom.ls_erosion_factor}) "
+                f"con afloramientos rocosos cuarcíticos y contacto lítico somero < 25 cm ({clase_label}). Inapto para laboreo agrícola."
             )
-            cultivos = ["Lotus tenuis / corniculatus", "Agropiro alargado", "Festuca arundinacea", "Melilotus alba"]
+            cultivos = ["Inapto para cultivos agrícolas", "Pastizal serrano nativo (conservación)", "Reserva natural / Flora autóctona"]
             recomendaciones = [
-                "Evitar laboreo convencional para no degradar el horizonte superficial ni ascender sales.",
-                "Implantar Agropiro alargado y Lotus tenuis en los bajos alcalinos/hidromórficos.",
-                "Planificar apotreramiento respetando las curvas de nivel para separar lomas de reserva forrajera."
+                "Exclusión absoluta de roturación o labranza mecánica por afloramiento rocoso, suelo lítico (<25 cm) y pendiente crítica.",
+                "Destinar a conservación de cuenca serrana, reserva de biodiversidad (pastizal pampeano serrano) o turismo de naturaleza.",
+                "En valles coluviales basales, restringir el pastoreo a cargas mínimas para evitar carcavamiento y erosión laminar."
             ]
         else:
             dictamen = (
@@ -224,7 +301,7 @@ class AgroVerdictAgent:
                 "No realizar canalizaciones clandestinas que trasladen excedentes hídricos a lotes vecinos."
             ]
 
-        if geom.ls_erosion_factor >= 0.45:
+        if geom.ls_erosion_factor >= 0.45 and not is_rocky_serrano:
             recomendaciones.append(
                 f"Control de erosión hídrica (Factor LS={geom.ls_erosion_factor}): sembrar cortando la pendiente principal ({geom.slope_pct}%) o en curvas de nivel."
             )

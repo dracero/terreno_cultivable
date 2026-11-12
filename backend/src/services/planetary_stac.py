@@ -15,13 +15,27 @@ def get_bbox(lat: float, lon: float, buffer_km: float = 1.5) -> List[float]:
         round(lat + deg_lat, 5),
     ]
 
+def _ventania_ridge_distance(lat: float, lon: float) -> float:
+    """Distancia euclídea mínima en grados al eje de cordones del Sistema de Ventania."""
+    ventania_nodes = [
+        (-38.145, -61.975),  # Sierra de la Ventana / Cerro Tres Picos / Napostá
+        (-38.075, -62.020),  # Abra de la Ventana / Cerro Ventana / Tornquist
+        (-38.080, -61.925),  # Villa Ventana / Sierra de las Tunas
+        (-37.800, -62.140),  # Sierra de Curamalal / Sierra de Bravard
+        (-38.150, -61.660),  # Sierra de Pillahuincó
+    ]
+    return min(math.sqrt((lat - nlat) ** 2 + (lon - nlon) ** 2) for nlat, nlon in ventania_nodes)
+
+
 def estimate_ba_topography(lat: float, lon: float) -> Tuple[float, float, float]:
     """
     Modela la geomorfología y cota altimétrica de la Provincia de Buenos Aires.
     Retorna: (elevación_m, pendiente_grados, score_depresion_relativa)
     
     Subregiones biogeográficas de Buenos Aires:
-    - Tandilia / Ventania (Serrana): altitudes 150m - 500m, pendientes 2.0° - 8.0°
+    - Cordón Serrano de Ventania (Sierras de la Ventana / Tres Picos / Curamalal):
+      altitudes 360m - 820m, pendientes escarpadas 7.5° - 15.0° (13% - 27%), roca aflorante.
+    - Piedemonte de Ventania y Tandilia: altitudes 175m - 340m, pendientes 1.4° - 5.5°.
     - Pampa Ondulada (Norte: Pergamino, San Pedro, Arrecifes): cota 40m - 75m, suave ondulación (0.5° - 1.5°)
     - Pampa Deprimida / Cuenca del Salado (Chascomús, Dolores, Castelli, Saladillo, Las Flores):
       cota muy baja (5m - 25m), pendientes casi nulas (<0.1°), alta presencia de cubetas y cañadas.
@@ -29,22 +43,34 @@ def estimate_ba_topography(lat: float, lon: float) -> Tuple[float, float, float]
     - Costa / Samborombón: cota 1m - 6m, influencia de mareas y desbordes.
     """
     # Distancia a centros morfológicos
-    # Tandilia: lat -37.3, lon -59.1
-    dist_tandil = math.sqrt((lat - (-37.3))**2 + (lon - (-59.1))**2)
-    # Ventania: lat -38.1, lon -62.0
-    dist_ventania = math.sqrt((lat - (-38.1))**2 + (lon - (-62.0))**2)
+    # Tandilia (Piedemonte y sierras): lat -37.3, lon -59.1
+    dist_tandil = math.sqrt((lat - (-37.3)) ** 2 + (lon - (-59.1)) ** 2)
+    # Crestas rocosas puntuales de Tandilia (Sierra del Tigre / Las Ánimas)
+    dist_tandil_crest = math.sqrt((lat - (-37.375)) ** 2 + (lon - (-59.145)) ** 2)
+    # Sistema de Ventania (arco serrano plegado)
+    dist_ventania = _ventania_ridge_distance(lat, lon)
     # Bahía Samborombón: lat -36.0, lon -57.5
-    dist_costa = math.sqrt((lat - (-36.0))**2 + (lon - (-57.5))**2)
+    dist_costa = math.sqrt((lat - (-36.0)) ** 2 + (lon - (-57.5)) ** 2)
 
-    if dist_tandil < 0.6:
-        # Zona serrana Tandil
-        elevation = 180.0 + (0.6 - dist_tandil) * 350.0
-        slope = 2.5 + (0.6 - dist_tandil) * 5.0
-        depression = 0.05
-    elif dist_ventania < 0.6:
-        # Zona serrana Ventana
-        elevation = 250.0 + (0.6 - dist_ventania) * 450.0
-        slope = 3.5 + (0.6 - dist_ventania) * 6.0
+    if dist_ventania < 0.28:
+        # Cordón Serrano Escarpado de Ventania (Sierras de la Ventana, Tres Picos, Curamalal)
+        elevation = 360.0 + (0.28 - dist_ventania) * 1450.0
+        slope = 7.5 + (0.28 - dist_ventania) * 25.0
+        depression = 0.03
+    elif dist_ventania < 0.58:
+        # Piedemonte Periserrano y Abras de Ventania (tosca y contacto lítico somero)
+        elevation = 200.0 + (0.58 - dist_ventania) * 530.0
+        slope = 2.6 + (0.58 - dist_ventania) * 12.0
+        depression = 0.06
+    elif dist_tandil_crest < 0.04:
+        # Cresta granítica rocosa de Tandilia (afloramientos precámbricos)
+        elevation = 290.0 + (0.04 - dist_tandil_crest) * 2200.0
+        slope = 6.5 + (0.04 - dist_tandil_crest) * 75.0
+        depression = 0.04
+    elif dist_tandil < 0.6:
+        # Piedemonte Serrano y Lomadas de Tandilia (suelos profundos bien drenados)
+        elevation = 175.0 + (0.6 - dist_tandil) * 90.0
+        slope = 1.35 + (0.6 - dist_tandil) * 1.05
         depression = 0.05
     elif lat > -34.8 and lon < -59.5:
         # Pampa Ondulada Norte (Pergamino, Colón, Rojas)

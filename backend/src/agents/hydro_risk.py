@@ -107,8 +107,19 @@ class HydroRiskAgent:
 
         confidence = round(float(choice_obj.confidence or 0.9), 3)
 
+        is_steep_serrano = geom.slope_pct >= 8.0 or geo_state.elevation_m >= 310.0
+        if is_steep_serrano:
+            score_label = "Relieve serrano escarpado / Escorrentía rápida"
+            if choice_key == "sin_anegamiento":
+                choice_label = "Escorrentía torrencial sin anegamiento (alta erosión)"
+
         # Resumen hidrológico
-        if noul_val > 0.65:
+        if is_steep_serrano:
+            resumen = (
+                f"Riesgo de anegamiento nulo ({int(noul_val*100)}%), pero escorrentía superficial torrencial "
+                f"por fuerte pendiente serrana ({geom.slope_pct}%, Factor LS {geom.ls_erosion_factor})."
+            )
+        elif noul_val > 0.65:
             resumen = f"Riesgo hídrico crítico ({int(noul_val*100)}%). Sujeto a {choice_label.lower()} con drenaje deficiente (TWI {geom.twi_value})."
         elif noul_val > 0.35:
             resumen = f"Riesgo hídrico moderado/intermedio ({int(noul_val*100)}%). Vulnerabilidad en eventos Niño (Napa est. {geom.estimated_water_table_depth_m}m)."

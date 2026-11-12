@@ -44,13 +44,23 @@ PRESET_LOCATIONS: List[PresetLocation] = [
     ),
     PresetLocation(
         id="tandil_serrana",
-        name="Tandil (Sistema Serrano)",
+        name="Tandil (Piedemonte Serrano)",
         partido="Tandil",
         lat=-37.3210,
         lon=-59.1330,
-        description="Relieve serrano de Tandilia con excelente pendiente natural, cotas sobre 180 msnm y nulo riesgo de acumulación hídrica.",
-        badge="Drenaje Rápido / Relieve Fuerte",
-        typology="Zona Serrana"
+        description="Piedemonte serrano de Tandilia con excelente pendiente natural, suelos Argiudoles bien drenados y nulo riesgo de acumulación hídrica.",
+        badge="Drenaje Rápido / Piedemonte",
+        typology="Piedemonte Serrano"
+    ),
+    PresetLocation(
+        id="sierra_ventana_cordon",
+        name="Sierra de la Ventana (Cordón Serrano Escarpado)",
+        partido="Tornquist",
+        lat=-38.1450,
+        lon=-61.9750,
+        description="Macizo plegado del Sistema de Ventania con fuertes pendientes (>15%), afloramientos rocosos cuarcíticos y suelos líticos someros (<25 cm). No cultivable (Clases VII–VIII INTA).",
+        badge="No Cultivable / Afloramiento Rocoso",
+        typology="Cordón Serrano Escarpado"
     ),
     PresetLocation(
         id="saladillo_media",

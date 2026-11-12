@@ -28,32 +28,63 @@ def _cardinal_from_azimuth(deg: float, slope_pct: float) -> str:
     return dirs[idx][0]
 
 
+def _ventania_ridge_distance(lat: float, lon: float) -> float:
+    """Distancia euclídea mínima en grados al eje de cordones del Sistema de Ventania."""
+    ventania_nodes = [
+        (-38.145, -61.975),  # Sierra de la Ventana / Cerro Tres Picos / Napostá
+        (-38.075, -62.020),  # Abra de la Ventana / Cerro Ventana / Tornquist
+        (-38.080, -61.925),  # Villa Ventana / Sierra de las Tunas
+        (-37.800, -62.140),  # Sierra de Curamalal / Sierra de Bravard
+        (-38.150, -61.660),  # Sierra de Pillahuincó
+    ]
+    return min(math.sqrt((lat - nlat) ** 2 + (lon - nlon) ** 2) for nlat, nlon in ventania_nodes)
+
+
 def _classify_region_geomorphology(lat: float, lon: float) -> Dict[str, Any]:
     """
     Determina la unidad geomorfológica pampeana, taxonomía edáfica de referencia (INTA),
     profundidad media de napa freática y parámetros de modelado de micro-relieve.
     """
     dist_tandil = math.sqrt((lat - (-37.32)) ** 2 + (lon - (-59.13)) ** 2)
-    dist_ventania = math.sqrt((lat - (-38.10)) ** 2 + (lon - (-62.00)) ** 2)
+    dist_tandil_crest = math.sqrt((lat - (-37.375)) ** 2 + (lon - (-59.145)) ** 2)
+    dist_ventania = _ventania_ridge_distance(lat, lon)
     dist_costa = math.sqrt((lat - (-36.10)) ** 2 + (lon - (-57.45)) ** 2)
 
-    if dist_tandil < 0.65:
+    if dist_ventania < 0.28:
+        return {
+            "region": "Sistema Serrano de Ventania (Cordón Rocoso Escarpado / Sierras de la Ventana)",
+            "soil_taxonomy": "Afloramiento Rocoso Cuarcítico / Hapludol Lítico somero (contacto lítico < 25 cm, Clase VII-VIII)",
+            "base_water_table_m": 14.0,
+            "contour_interval_m": 10.0,
+            "morph_type": "serrano_escarpado",
+            "drainage_network": "Torrencial de alta pendiente sobre basamento cuarcítico plegado",
+        }
+    elif dist_ventania < 0.58:
+        return {
+            "region": "Piedemonte Periserrano de Ventania (Lomadas con Tosca Somera)",
+            "soil_taxonomy": "Hapludol petrocálcico / Argiudol lítico (tosca calcárea y roca a 35–60 cm)",
+            "base_water_table_m": 9.0,
+            "contour_interval_m": 5.0,
+            "morph_type": "serrano",
+            "drainage_network": "Exorreica torrencial de alta energía con riesgo de erosión en surcos",
+        }
+    elif dist_tandil_crest < 0.04:
+        return {
+            "region": "Sistema Serrano de Tandilia (Cresta Granítica Rocosa)",
+            "soil_taxonomy": "Afloramiento Rocoso Precámbrico / Hapludol Lítico somero (< 30 cm)",
+            "base_water_table_m": 12.0,
+            "contour_interval_m": 10.0,
+            "morph_type": "serrano_escarpado",
+            "drainage_network": "Exorreica radial de fuerte pendiente sobre basamento cristalino",
+        }
+    elif dist_tandil < 0.65:
         return {
             "region": "Sistema Serrano de Tandilia (Piedemonte y Lomadas)",
-            "soil_taxonomy": "Argiudol típico / Hapludol lítico (contacto rocoso somero en crestas)",
+            "soil_taxonomy": "Argiudol típico / Hapludol lítico (suelos profundos en piedemonte, contacto rocoso en dorsos)",
             "base_water_table_m": 8.5,
             "contour_interval_m": 5.0,
             "morph_type": "serrano",
             "drainage_network": "Exorreica dendrítica bien integrada (arroyos serranos)",
-        }
-    elif dist_ventania < 0.65:
-        return {
-            "region": "Sistema Serrano de Ventania (Pendientes pronunciadas)",
-            "soil_taxonomy": "Hapludol petrocálcico / Argiudol somero con tosca",
-            "base_water_table_m": 9.0,
-            "contour_interval_m": 5.0,
-            "morph_type": "serrano",
-            "drainage_network": "Exorreica torrencial de alta energía",
         }
     elif lat > -34.85 and lon < -59.4:
         return {
@@ -145,11 +176,17 @@ def _compute_point_elevation(
         bajo_inter = -1.15 * math.exp(-((rot_x - 0.1) ** 2 / 0.22 + (rot_y + 0.15) ** 2 / 0.55))
         micro = 0.35 * math.sin(dx_km * 4.0) * math.cos(dy_km * 3.5)
         z = base_elev + regional_plane + medanos + bajo_inter + micro
+    elif morph_type == "serrano_escarpado":
+        # Sierras de la Ventana / Crestas rocosas: fuertes escarpas, dorsos cuarcíticos y quebradas profundas
+        cerro = 54.0 * math.exp(-((dx_km + 0.30) ** 2 / 0.45 + (dy_km - 0.30) ** 2 / 0.42))
+        valle = -24.0 * math.exp(-((dx_km * 0.75 - dy_km * 0.65 - 0.12) ** 2) / 0.22)
+        espolon = 16.0 * math.sin(dx_km * 2.4 + seed_phase) * math.cos(dy_km * 2.1)
+        z = base_elev + regional_plane + cerro + valle + espolon
     elif morph_type == "serrano":
-        # Tandilia / Ventania: fuertes desniveles, dorsos rocosos y valles de drenaje rápido
-        cerro = 26.0 * math.exp(-((dx_km + 0.35) ** 2 / 0.55 + (dy_km - 0.35) ** 2 / 0.50))
-        valle = -12.0 * math.exp(-((dx_km * 0.75 - dy_km * 0.65 - 0.15) ** 2) / 0.25)
-        espolon = 9.5 * math.sin(dx_km * 2.1 + seed_phase) * math.cos(dy_km * 1.9)
+        # Piedemonte y lomadas serranas: desniveles moderados a fuertes y valles de drenaje integrado
+        cerro = 18.0 * math.exp(-((dx_km + 0.35) ** 2 / 0.55 + (dy_km - 0.35) ** 2 / 0.50))
+        valle = -8.5 * math.exp(-((dx_km * 0.75 - dy_km * 0.65 - 0.15) ** 2) / 0.25)
+        espolon = 6.5 * math.sin(dx_km * 2.1 + seed_phase) * math.cos(dy_km * 1.9)
         z = base_elev + regional_plane + cerro + valle + espolon
     else:
         # Llanura mixta
@@ -466,7 +503,20 @@ def build_topographic_analysis(
     center_z = z_grid[grid_n // 2][grid_n // 2]
     tpi_val = round(center_z - z_mean, 2)
     tpi_norm = tpi_val / max(0.35, relief_amp * 0.5)
-    if tpi_norm > 0.35:
+    is_steep_serrano = (
+        morph_type == "serrano_escarpado"
+        or mean_slope_pct >= 8.0
+        or elevation_m >= 310.0
+    )
+
+    if is_steep_serrano:
+        if tpi_norm > 0.25:
+            tpi_label = "Cumbre / Cresta rocosa de alta pendiente"
+        elif tpi_norm > -0.30:
+            tpi_label = "Ladera serrana escarpada / Escorrentía torrencial"
+        else:
+            tpi_label = "Quebrada / Valle interserrano colector"
+    elif tpi_norm > 0.35:
         tpi_label = "Loma convexa / Posición emisora de agua"
     elif tpi_norm > -0.25:
         tpi_label = "Media loma / Plano de tránsito hídrico"
@@ -498,7 +548,9 @@ def build_topographic_analysis(
         * (65.41 * (math.sin(theta_rad) ** 2) + 4.56 * math.sin(theta_rad) + 0.065),
         2,
     )
-    if ls_factor >= 1.2 or mean_slope_pct >= 2.5:
+    if is_steep_serrano or ls_factor >= 2.5 or mean_slope_pct >= 7.0:
+        erosion_label = "Crítico / Muy Alto (Pendiente serrana escarpada y suelo lítico somero; no arable)"
+    elif ls_factor >= 1.2 or mean_slope_pct >= 2.5:
         erosion_label = "Alto (Riesgo de erosión laminar y en surcos; requiere terrazas/curvas de nivel)"
     elif ls_factor >= 0.35 or mean_slope_pct >= 0.8:
         erosion_label = "Moderado (Susceptible a escorrentía en barbechos desnudos; exige cobertura)"
@@ -516,6 +568,12 @@ def build_topographic_analysis(
         z_q25 = z_min + relief_amp * 0.42
         z_q50 = z_min + relief_amp * 0.68
         z_q78 = z_min + relief_amp * 0.86
+    elif is_steep_serrano:
+        # En cordones rocosos escarpados (Sierras de la Ventana), las cotas medias/altas son roca aflorante
+        # y ladera escarpada (no cultivables), y sólo el pie de monte inferior acumula coluvio.
+        z_q25 = z_min + relief_amp * 0.14
+        z_q50 = z_min + relief_amp * 0.32
+        z_q78 = z_min + relief_amp * 0.58
     elif depression_score <= 0.18:
         z_q25 = z_min + relief_amp * 0.10
         z_q50 = z_min + relief_amp * 0.28
@@ -533,45 +591,84 @@ def build_topographic_analysis(
         z_row_classes: List[str] = []
         for c in range(grid_n):
             zv = z_grid[r][c]
-            if zv >= z_q78:
-                zk = "loma_alta"
-            elif zv >= z_q50:
-                zk = "media_loma"
-            elif zv >= z_q25:
-                zk = "bajo_dulce"
+            if is_steep_serrano:
+                # En macizos serranos escarpados, la cumbre y ladera alta son roca aflorante (no cultivable)
+                if zv >= z_q78:
+                    zk = "bajo_inundable"
+                elif zv >= z_q50:
+                    zk = "bajo_dulce"
+                elif zv >= z_q25:
+                    zk = "media_loma"
+                else:
+                    zk = "loma_alta"
             else:
-                zk = "bajo_inundable"
+                if zv >= z_q78:
+                    zk = "loma_alta"
+                elif zv >= z_q50:
+                    zk = "media_loma"
+                elif zv >= z_q25:
+                    zk = "bajo_dulce"
+                else:
+                    zk = "bajo_inundable"
             z_row_classes.append(zk)
             zone_buckets[zk].append(zv)
         zone_Grid.append(z_row_classes)
 
     total_cells = float(grid_n * grid_n)
-    zone_meta = [
-        (
-            "loma_alta",
-            "Loma Alta Bien Drenada",
-            "#10b981",
-            "Suelo profundo y aireado, sin riesgo de anegamiento. Alta respuesta a fertilización y cultivos exigentes (Maíz temprano, Soja 1ª, Trigo).",
-        ),
-        (
-            "media_loma",
-            "Media Loma de Transición",
-            "#3b82f6",
-            "Posición intermedia de tránsito hídrico; excelente provisión de agua útil en años secos y drenaje aceptable en años normales.",
-        ),
-        (
-            "bajo_dulce",
-            "Bajo Tendido / Bajo Dulce",
-            "#f59e0b",
-            "Acumulación temporal de escorrentía y napa cercana. Apto para cultivos tolerantes (Sorgo, Soja grupo largo) o pasturas consociadas.",
-        ),
-        (
-            "bajo_inundable",
-            "Bajo Inundable / Cubeta",
-            "#ef4444",
-            "Depresión receptora con anegamiento frecuente o alcalinidad sódica (horizonte Bt nátrico). Uso exclusivo ganadero (Agropiro, Lotus tenuis) o reserva hídrica.",
-        ),
-    ]
+    if is_steep_serrano:
+        zone_meta = [
+            (
+                "loma_alta",
+                "Piedemonte Coluvial (Valle Serrano)",
+                "#10b981",
+                "Sector basal de acumulación coluvial con mayor espesor edáfico relativo; apto únicamente para pasturas o verdeos en contorno.",
+            ),
+            (
+                "media_loma",
+                "Faldeo Periserrano Tendido",
+                "#3b82f6",
+                "Ladera inferior con contacto lítico/petrocálcico somero (30–50 cm); uso ganadero extensivo con control estricto de erosión.",
+            ),
+            (
+                "bajo_dulce",
+                "Ladera Serrana Escarpada (Suelo Lítico <25 cm)",
+                "#f59e0b",
+                "Fuerte pendiente (>10%) con escorrentía rápida y alta susceptibilidad a erosión hídrica. Inapto para laboreo agrícola (Clase VI–VII).",
+            ),
+            (
+                "bajo_inundable",
+                "Cumbre y Afloramiento Rocoso Cuarcítico",
+                "#ef4444",
+                "Roca paleozoica aflorante y crestas escarpadas sin desarrollo edáfico útil (<10 cm). No cultivable (Clase VIII INTA); reserva natural.",
+            ),
+        ]
+    else:
+        zone_meta = [
+            (
+                "loma_alta",
+                "Loma Alta Bien Drenada",
+                "#10b981",
+                "Suelo profundo y aireado, sin riesgo de anegamiento. Alta respuesta a fertilización y cultivos exigentes (Maíz temprano, Soja 1ª, Trigo).",
+            ),
+            (
+                "media_loma",
+                "Media Loma de Transición",
+                "#3b82f6",
+                "Posición intermedia de tránsito hídrico; excelente provisión de agua útil en años secos y drenaje aceptable en años normales.",
+            ),
+            (
+                "bajo_dulce",
+                "Bajo Tendido / Bajo Dulce",
+                "#f59e0b",
+                "Acumulación temporal de escorrentía y napa cercana. Apto para cultivos tolerantes (Sorgo, Soja grupo largo) o pasturas consociadas.",
+            ),
+            (
+                "bajo_inundable",
+                "Bajo Inundable / Cubeta",
+                "#ef4444",
+                "Depresión receptora con anegamiento frecuente o alcalinidad sódica (horizonte Bt nátrico). Uso exclusivo ganadero (Agropiro, Lotus tenuis) o reserva hídrica.",
+            ),
+        ]
 
     terrain_zones: List[TerrainZoneStat] = []
     for zk, zlabel, zcolor, zdesc in zone_meta:
