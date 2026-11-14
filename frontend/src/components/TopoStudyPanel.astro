@@ -14,8 +14,14 @@
     </div>
 
     <div class="topo-actions">
+      <button type="button" class="btn btn-secondary btn-sm" id="btn-export-dxf" title="Descargar curvas de nivel 3D y derrotero en formato DXF para AutoCAD / Civil 3D">
+        📐 Exportar DXF (AutoCAD)
+      </button>
+      <button type="button" class="btn btn-secondary btn-sm" id="btn-export-kml" title="Descargar parcela y curvas en formato KML para Google Earth">
+        🌐 Exportar KML
+      </button>
       <button type="button" class="btn btn-secondary btn-sm" id="btn-export-geojson" title="Descargar curvas de nivel, vectores de flujo y perfiles en formato GeoJSON">
-        ⬇️ Exportar GeoJSON Topográfico
+        ⬇️ Exportar GeoJSON
       </button>
     </div>
   </div>
@@ -145,6 +151,18 @@
         <p class="idx-desc" id="idx-soil-tax">Clasificación taxonómica y serie de referencia...</p>
         <div class="idx-submeta">
           <span>Capacidad de Uso: <strong id="idx-clase-uso">--</strong></span>
+        </div>
+      </div>
+
+      <!-- 7. Geodesia Oficial POSGAR 2007 (IGN) -->
+      <div class="index-card geod-card">
+        <div class="idx-head">
+          <span class="idx-tag">Geodesia POSGAR 07 (IGN)</span>
+          <span class="badge badge-jev" id="idx-faja-badge">Faja --</span>
+        </div>
+        <p class="idx-desc" id="idx-posgar-desc">Sistema de referencia cartográfico oficial de la República Argentina...</p>
+        <div class="idx-submeta">
+          <span>Ondulación N: <strong id="idx-geoid-n">-- m</strong> | Alt. Elipsoidal h: <strong id="idx-ellips-h">-- m</strong></span>
         </div>
       </div>
     </div>

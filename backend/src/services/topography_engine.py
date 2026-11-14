@@ -9,6 +9,7 @@ from ..schemas import (
     GeomorphologyMetrics,
     TopographicAnalysisData,
 )
+from .geodesy_engine import compute_geodetic_summary
 
 
 def _cardinal_from_azimuth(deg: float, slope_pct: float) -> str:
@@ -823,6 +824,8 @@ def build_topographic_analysis(
         estimated_water_table_depth_m=est_wt_center,
     )
 
+    geodesy_info = compute_geodetic_summary(lat, lon, elevation_m=center_z)
+
     return TopographicAnalysisData(
         grid_lats=lats,
         grid_lons=lons,
@@ -834,4 +837,5 @@ def build_topographic_analysis(
         contours=contours,
         flow_vectors=flow_vectors,
         elevation_profiles=profiles,
+        geodesy=geodesy_info,
     )

@@ -47,6 +47,11 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
     let currentMarker = null;
     let probeMarker = null;
 
+    // Capas Base y Proveedores de Teselas
+    let baseLayers = {};
+    let activeBaseLayerKey = 'satellite';
+    let labelsOverlayLayer = null;
+
     // Capas STAC y Topográficas
     let jrcLayer = null;
     let demLayer = null;
@@ -55,12 +60,17 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
     let flowGroup = null;
     let zonesGroup = null;
     let transectGroup = null;
+    let graticuleGroup = null;
+    let measureGroup = null;
+
+    // Estado de medición geodésica
+    let measurePoints = [];
 
     // Estado de datos actual
     let lastAnalysisData = null;
     let activeProfileId = 'north_south';
     let customProfileObj = null;
-    let mapInteractionMode = 'audit'; // 'audit' | 'transect'
+    let mapInteractionMode = 'audit'; // 'audit' | 'transect' | 'measure'
     let transectStartLatLng = null;
 
     // Coordenadas iniciales: Pergamino (Zona Núcleo Agrícola Rural verificada)
@@ -84,12 +94,17 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
     const layerWaterMaskCheckbox = document.getElementById('layer-water-mask');
     const layerZonesCheckbox = document.getElementById('layer-zones');
     const layerTransectCheckbox = document.getElementById('layer-transect');
+    const layerGraticuleCheckbox = document.getElementById('layer-graticule');
     const layerJrcCheckbox = document.getElementById('layer-jrc');
     const layerDemCheckbox = document.getElementById('layer-dem');
 
     // Botones de modo de mapa
     const modeAuditBtn = document.getElementById('mode-audit-btn');
     const modeTransectBtn = document.getElementById('mode-transect-btn');
+    const modeMeasureBtn = document.getElementById('mode-measure-btn');
+    const measureHudCard = document.getElementById('measure-hud-card');
+    const btnClearMeasure = document.getElementById('btn-clear-measure');
+    const btnCloseMeasure = document.getElementById('btn-close-measure');
 
     const ZONE_LABELS = {
       loma_alta: "Loma Alta Bien Drenada",
@@ -113,18 +128,67 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
         zoomControl: true
       });
 
-      // Capa base Satélite Esri
-      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      // Definición de Capas Base Cartográficas / Topográficas
+      const satLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
         attribution: 'Tiles &copy; Esri, Maxar, Earthstar Geographics',
-        maxZoom: 18
+        maxZoom: 19
+      });
+
+      const topoLayer = L.tileLayer('https://tile.opentopomap.org/{z}/{x}/{y}.png', {
+        attribution: 'Map data: &copy; OpenStreetMap contributors, SRTM | Map style: &copy; OpenTopoMap (CC-BY-SA)',
+        maxZoom: 17
+      });
+
+      const shadedLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Shaded_Relief/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles &copy; Esri, USGS',
+        maxZoom: 15
+      });
+
+      const osmLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors',
+        maxZoom: 19
+      });
+
+      baseLayers = {
+        satellite: satLayer,
+        opentopo: topoLayer,
+        shaded: shadedLayer,
+        osm: osmLayer
+      };
+
+      // Iniciar con la capa satelital activa
+      satLayer.addTo(map);
+
+      // Etiquetas y límites administrativos (para satélite y relieve)
+      labelsOverlayLayer = L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+        attribution: '',
+        maxZoom: 19,
+        opacity: 0.75
       }).addTo(map);
 
-      // Etiquetas y rutas
-      L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
-        attribution: '',
-        maxZoom: 18,
-        opacity: 0.7
-      }).addTo(map);
+      // Conmutar Capas Base
+      function setBaseMap(layerKey) {
+        if (!baseLayers[layerKey] || layerKey === activeBaseLayerKey) return;
+        map.removeLayer(baseLayers[activeBaseLayerKey]);
+        baseLayers[layerKey].addTo(map);
+        activeBaseLayerKey = layerKey;
+
+        // Las etiquetas quedan sobre satélite o sombreado, se ocultan en OpenTopo/OSM para no duplicar texto
+        if (layerKey === 'satellite' || layerKey === 'shaded') {
+          if (!map.hasLayer(labelsOverlayLayer)) labelsOverlayLayer.addTo(map);
+        } else {
+          if (map.hasLayer(labelsOverlayLayer)) map.removeLayer(labelsOverlayLayer);
+        }
+
+        // Actualizar estado visual de los botones
+        document.querySelectorAll('.basemap-btn').forEach(btn => {
+          btn.classList.toggle('active', btn.dataset.basemap === layerKey);
+        });
+      }
+
+      document.querySelectorAll('.basemap-btn').forEach(btn => {
+        btn.addEventListener('click', () => setBaseMap(btn.dataset.basemap));
+      });
 
       // Grupos de capas topográficas locales
       zonesGroup = L.layerGroup();
@@ -132,6 +196,8 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
       contourGroup = L.layerGroup().addTo(map);
       flowGroup = L.layerGroup().addTo(map);
       transectGroup = L.layerGroup().addTo(map);
+      graticuleGroup = L.layerGroup().addTo(map);
+      measureGroup = L.layerGroup().addTo(map);
 
       // Marcador central de parcela
       const farmIcon = L.divIcon({
@@ -158,7 +224,9 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
         const lat = parseFloat(e.latlng.lat.toFixed(5));
         const lon = parseFloat(e.latlng.lng.toFixed(5));
 
-        if (mapInteractionMode === 'transect' && lastAnalysisData) {
+        if (mapInteractionMode === 'measure') {
+          handleMeasureMapClick(lat, lon);
+        } else if (mapInteractionMode === 'transect' && lastAnalysisData) {
           handleTransectMapClick(lat, lon);
         } else {
           setCoordinates(lat, lon, `Lote (${lat.toFixed(4)}, ${lon.toFixed(4)})`);
@@ -192,6 +260,11 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
         else map.removeLayer(transectGroup);
       });
 
+      layerGraticuleCheckbox?.addEventListener('change', (e) => {
+        if (e.target.checked) map.addLayer(graticuleGroup);
+        else map.removeLayer(graticuleGroup);
+      });
+
       layerJrcCheckbox?.addEventListener('change', (e) => {
         if (jrcLayer) {
           if (e.target.checked) map.addLayer(jrcLayer);
@@ -207,21 +280,32 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
       });
     }
 
-    // Cambiar modo de clic en el mapa (Auditar vs Trazar Corte A -> B)
+    // Cambiar modo de clic en el mapa (Auditar vs Trazar Corte A -> B vs Medición)
     function setMapMode(mode) {
       mapInteractionMode = mode;
       transectStartLatLng = null;
-      if (mode === 'transect') {
-        modeTransectBtn?.classList.add('active');
-        modeAuditBtn?.classList.remove('active');
+
+      modeAuditBtn?.classList.toggle('active', mode === 'audit');
+      modeTransectBtn?.classList.toggle('active', mode === 'transect');
+      modeMeasureBtn?.classList.toggle('active', mode === 'measure');
+
+      if (measureHudCard) {
+        measureHudCard.style.display = mode === 'measure' ? 'flex' : 'none';
+      }
+
+      if (mode === 'measure') {
+        if (mapHintBanner) {
+          mapHintBanner.innerHTML = '📐 <b>Modo Medición Geodésica:</b> Haz click en el mapa para marcar vértices del derrotero y calcular distancias elipsoidales';
+          mapHintBanner.style.borderColor = '#a78bfa';
+          mapHintBanner.style.color = '#ede9fe';
+        }
+      } else if (mode === 'transect') {
         if (mapHintBanner) {
           mapHintBanner.innerHTML = '📏 <b>Modo Corte Topográfico:</b> Haz click en el <b>Punto A</b> de inicio sobre la grilla del lote';
           mapHintBanner.style.borderColor = '#38bdf8';
           mapHintBanner.style.color = '#e0f2fe';
         }
       } else {
-        modeAuditBtn?.classList.add('active');
-        modeTransectBtn?.classList.remove('active');
         if (mapHintBanner) {
           mapHintBanner.innerHTML = '📍 <b>Modo Auditoría:</b> Haz click en cualquier punto del mapa para analizar su topografía y riesgo hídrico';
           mapHintBanner.style.borderColor = 'rgba(255, 255, 255, 0.12)';
@@ -232,6 +316,13 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
 
     modeAuditBtn?.addEventListener('click', () => setMapMode('audit'));
     modeTransectBtn?.addEventListener('click', () => setMapMode('transect'));
+    modeMeasureBtn?.addEventListener('click', () => setMapMode('measure'));
+    btnCloseMeasure?.addEventListener('click', () => setMapMode('audit'));
+    btnClearMeasure?.addEventListener('click', () => {
+      measurePoints = [];
+      measureGroup.clearLayers();
+      updateMeasureHud();
+    });
 
     function setCoordinates(lat, lon, name) {
       selectedLat = lat;
@@ -357,6 +448,173 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
 
         if (mapHintBanner) {
           mapHintBanner.innerHTML = '✅ Corte A → B generado abajo. Puedes hacer click nuevamente para trazar otro corte o volver a Modo Auditoría.';
+        }
+      }
+    }
+
+    // Gestión de Medición Geodésica Interactiva (Distancias, Azimut, Derrotero)
+    function handleMeasureMapClick(lat, lon) {
+      const topo = lastAnalysisData?.geospatial?.topography;
+      const sampled = topo ? sampleDemGrid(topo, lat, lon) : { elevation_m: 0 };
+      const vIdx = measurePoints.length + 1;
+
+      // Calcular coordenadas Gauss-Krüger aproximadas en cliente para la tabla
+      const faja = lon < -61.5 ? 4 : (lon < -58.5 ? 5 : 6);
+      const lon0 = -72.0 + (faja - 1) * 3.0;
+      const dLon = (lon - lon0) * (Math.PI / 180);
+      const latRad = lat * (Math.PI / 180);
+      const xGk = Math.round(10000000 + (lat * 111132));
+      const yGk = Math.round((faja * 1000000) + 500000 + (dLon * 6378137 * Math.cos(latRad)));
+
+      measurePoints.push({
+        idx: vIdx,
+        lat,
+        lon,
+        elevation_m: sampled.elevation_m,
+        xGk,
+        yGk
+      });
+
+      // Dibujar vértice en el mapa
+      const vIcon = L.divIcon({
+        className: 'measure-vertex-pin',
+        html: `<div style="background:#8b5cf6; color:#ffffff; font-size:10px; font-weight:800; width:18px; height:18px; border-radius:50%; border:2px solid #ffffff; display:flex; align-items:center; justify-content:center; box-shadow:0 0 10px #8b5cf6;">${vIdx}</div>`,
+        iconSize: [18, 18],
+        iconAnchor: [9, 9]
+      });
+
+      measureGroup.addLayer(L.marker([lat, lon], { icon: vIcon }));
+
+      if (measurePoints.length >= 2) {
+        const polylineCoords = measurePoints.map(p => [p.lat, p.lon]);
+        measureGroup.clearLayers();
+
+        // Redibujar todos los vértices
+        measurePoints.forEach(p => {
+          const icon = L.divIcon({
+            className: 'measure-vertex-pin',
+            html: `<div style="background:#8b5cf6; color:#ffffff; font-size:10px; font-weight:800; width:18px; height:18px; border-radius:50%; border:2px solid #ffffff; display:flex; align-items:center; justify-content:center; box-shadow:0 0 10px #8b5cf6;">${p.idx}</div>`,
+            iconSize: [18, 18],
+            iconAnchor: [9, 9]
+          });
+          measureGroup.addLayer(L.marker([p.lat, p.lon], { icon }));
+        });
+
+        const line = L.polyline(polylineCoords, {
+          color: '#a78bfa',
+          weight: 3,
+          dashArray: '6, 4'
+        });
+        measureGroup.addLayer(line);
+
+        if (measurePoints.length >= 3) {
+          const poly = L.polygon(polylineCoords, {
+            color: '#8b5cf6',
+            fillColor: '#8b5cf6',
+            fillOpacity: 0.15,
+            weight: 1
+          });
+          measureGroup.addLayer(poly);
+        }
+      }
+
+      updateMeasureHud();
+    }
+
+    // Cálculo de Distancia Elipsoidal (Haversine/Vincenty approx), Azimut y Rumbo
+    function computeGeodeticLeg(p1, p2) {
+      const R = 6378137.0; // WGS84
+      const dLat = (p2.lat - p1.lat) * Math.PI / 180;
+      const dLon = (p2.lon - p1.lon) * Math.PI / 180;
+      const lat1 = p1.lat * Math.PI / 180;
+      const lat2 = p2.lat * Math.PI / 180;
+
+      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.sin(dLon/2) * Math.sin(dLon/2) * Math.cos(lat1) * Math.cos(lat2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      const dist = R * c;
+
+      const y = Math.sin(dLon) * Math.cos(lat2);
+      const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+      const brng = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+
+      let bearingStr = "";
+      if (brng >= 0 && brng < 90) bearingStr = `N ${brng.toFixed(1)}° E`;
+      else if (brng >= 90 && brng < 180) bearingStr = `S ${(180 - brng).toFixed(1)}° E`;
+      else if (brng >= 180 && brng < 270) bearingStr = `S ${(brng - 180).toFixed(1)}° W`;
+      else bearingStr = `N ${(360 - brng).toFixed(1)}° W`;
+
+      return { dist, azimuth: brng, bearingStr };
+    }
+
+    function updateMeasureHud() {
+      const distElem = document.getElementById('mhud-dist');
+      const azimElem = document.getElementById('mhud-azim');
+      const bearElem = document.getElementById('mhud-bearing');
+      const areaElem = document.getElementById('mhud-area');
+      const tbody = document.getElementById('mhud-tbody');
+
+      if (!tbody) return;
+
+      if (measurePoints.length === 0) {
+        if (distElem) distElem.textContent = '0.0 m';
+        if (azimElem) azimElem.textContent = '--°';
+        if (bearElem) bearElem.textContent = '--';
+        if (areaElem) areaElem.textContent = '-- ha';
+        tbody.innerHTML = '<tr><td colspan="5" class="mhud-empty">Haz click en el mapa para marcar vértices...</td></tr>';
+        return;
+      }
+
+      let totalDist = 0;
+      let lastAzim = 0;
+      let lastBearing = "--";
+      let rowsHtml = '';
+
+      for (let i = 0; i < measurePoints.length; i++) {
+        const pt = measurePoints[i];
+        let legDistStr = '--';
+        let legAzimStr = '--';
+
+        if (i > 0) {
+          const leg = computeGeodeticLeg(measurePoints[i - 1], pt);
+          totalDist += leg.dist;
+          lastAzim = leg.azimuth;
+          lastBearing = leg.bearingStr;
+          legDistStr = `${leg.dist.toFixed(1)} m`;
+          legAzimStr = `${leg.azimuth.toFixed(1)}° (${leg.bearingStr})`;
+        }
+
+        rowsHtml += `
+          <tr>
+            <td><b>V${pt.idx}</b></td>
+            <td>${pt.xGk}</td>
+            <td>${pt.yGk}</td>
+            <td>${legDistStr}</td>
+            <td>${legAzimStr}</td>
+          </tr>
+        `;
+      }
+
+      tbody.innerHTML = rowsHtml;
+      if (distElem) distElem.textContent = `${totalDist.toFixed(1)} m`;
+      if (azimElem) azimElem.textContent = measurePoints.length > 1 ? `${lastAzim.toFixed(1)}°` : '--°';
+      if (bearElem) bearElem.textContent = lastBearing;
+
+      // Cálculo de área con fórmula esférica de polígonos si n >= 3
+      if (areaElem) {
+        if (measurePoints.length >= 3) {
+          let areaM2 = 0;
+          for (let i = 0; i < measurePoints.length; i++) {
+            const j = (i + 1) % measurePoints.length;
+            const p1 = measurePoints[i];
+            const p2 = measurePoints[j];
+            areaM2 += (p1.yGk * p2.xGk) - (p2.yGk * p1.xGk);
+          }
+          areaM2 = Math.abs(areaM2) / 2.0;
+          const ha = (areaM2 / 10000.0).toFixed(2);
+          areaElem.textContent = `${ha} ha (${Math.round(areaM2).toLocaleString()} m²)`;
+        } else {
+          areaElem.textContent = '-- ha';
         }
       }
     }
@@ -546,6 +804,56 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
         fill: false,
         interactive: false
       }).addTo(contourGroup);
+
+      // 4. Cuadrícula Geodésica / Malla de Coordenadas (Graticule)
+      if (graticuleGroup) {
+        graticuleGroup.clearLayers();
+        const latStep = (lats[lats.length - 1] - lats[0]) / 4;
+        const lonStep = (lons[lons.length - 1] - lons[0]) / 4;
+
+        // Líneas de Latitud (Paralelos)
+        for (let i = 0; i <= 4; i++) {
+          const gLat = lats[0] + i * latStep;
+          const pLine = L.polyline([[gLat, lons[0]], [gLat, lons[lons.length - 1]]], {
+            color: 'rgba(255, 255, 255, 0.18)',
+            weight: 0.8,
+            dashArray: '2, 4',
+            interactive: false
+          });
+          graticuleGroup.addLayer(pLine);
+
+          // Etiqueta lateral
+          const dmsText = `${Math.abs(gLat).toFixed(3)}° S`;
+          const lIcon = L.divIcon({
+            className: 'graticule-lbl',
+            html: `<span style="color:#94a3b8; font-size:9px; font-family:monospace; background:rgba(10,15,29,0.7); padding:1px 3px; border-radius:2px;">${dmsText}</span>`,
+            iconSize: [50, 14],
+            iconAnchor: [50, 7]
+          });
+          graticuleGroup.addLayer(L.marker([gLat, lons[0]], { icon: lIcon, interactive: false }));
+        }
+
+        // Líneas de Longitud (Meridianos)
+        for (let j = 0; j <= 4; j++) {
+          const gLon = lons[0] + j * lonStep;
+          const mLine = L.polyline([[lats[0], gLon], [lats[lats.length - 1], gLon]], {
+            color: 'rgba(255, 255, 255, 0.18)',
+            weight: 0.8,
+            dashArray: '2, 4',
+            interactive: false
+          });
+          graticuleGroup.addLayer(mLine);
+
+          const dmsText = `${Math.abs(gLon).toFixed(3)}° W`;
+          const mIcon = L.divIcon({
+            className: 'graticule-lbl',
+            html: `<span style="color:#94a3b8; font-size:9px; font-family:monospace; background:rgba(10,15,29,0.7); padding:1px 3px; border-radius:2px;">${dmsText}</span>`,
+            iconSize: [50, 14],
+            iconAnchor: [25, 14]
+          });
+          graticuleGroup.addLayer(L.marker([lats[0], gLon], { icon: mIcon, interactive: false }));
+        }
+      }
     }
 
     // Dibujar en el mapa la línea de la transecta/corte actualmente seleccionada (A -> B)
@@ -793,6 +1101,39 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
       document.getElementById('idx-inta-ip').textContent = `IP ${verdict.indice_productividad_ip}/100`;
       document.getElementById('idx-soil-tax').textContent = geom.soil_taxonomy_inta;
       document.getElementById('idx-clase-uso').textContent = `${verdict.clase_capacidad_uso_label} (${verdict.limitante_edafica_label})`;
+
+      // 7. Telemetría y Geodesia Oficial POSGAR 2007
+      const geod = topo.geodesy;
+      if (geod) {
+        const gk = geod.gauss_kruger || {};
+        const alt = geod.altimetria_geodesica || {};
+        const utm = geod.utm || {};
+        const orient = geod.parametros_orientacion || {};
+
+        const teleGk = document.getElementById('tele-gk');
+        if (teleGk) teleGk.textContent = `X: ${Math.round(gk.coordenada_x_norte_m).toLocaleString()} m | Y: ${Math.round(gk.coordenada_y_este_m).toLocaleString()} m (Faja ${gk.faja})`;
+
+        const teleDms = document.getElementById('tele-dms');
+        if (teleDms) teleDms.textContent = `${geod.lat_dms} | ${geod.lon_dms}`;
+
+        const teleAlt = document.getElementById('tele-alt');
+        if (teleAlt) teleAlt.textContent = `H: ${alt.cota_ortometrica_h_msnm} msnm | N: ${alt.ondulacion_geoidal_n_m > 0 ? '+' : ''}${alt.ondulacion_geoidal_n_m} m | h: ${alt.altura_elipsoidal_h_m} m`;
+
+        const teleUtm = document.getElementById('tele-utm');
+        if (teleUtm) teleUtm.textContent = `Zona ${utm.zona} (${utm.epsg_code}) | Decl: ${orient.declinacion_str || '--'}`;
+
+        const fajaBadge = document.getElementById('idx-faja-badge');
+        if (fajaBadge) fajaBadge.textContent = `Faja ${gk.faja} (${gk.epsg_code})`;
+
+        const posgarDesc = document.getElementById('idx-posgar-desc');
+        if (posgarDesc) posgarDesc.textContent = `${gk.descripcion} · Meridiano Central ${gk.meridiano_central}° · Conve: ${orient.convergencia_str || '0°'}`;
+
+        const geoidN = document.getElementById('idx-geoid-n');
+        if (geoidN) geoidN.textContent = `${alt.ondulacion_geoidal_n_m > 0 ? '+' : ''}${alt.ondulacion_geoidal_n_m} m`;
+
+        const ellipsH = document.getElementById('idx-ellips-h');
+        if (ellipsH) ellipsH.textContent = `${alt.altura_elipsoidal_h_m} m`;
+      }
 
       // Zonificación por Ambientes Productivos
       const precisionBadge = document.getElementById('badge-precision-ag');
@@ -1160,6 +1501,93 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
       a.href = url;
       const safeName = (lastAnalysisData.request.parcel_name || 'parcela').toLowerCase().replace(/[^a-z0-9]+/g, '_');
       a.download = `topografia_${safeName}.geojson`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    // Botón Exportar DXF (AutoCAD / Civil 3D con elevación Z real y coordenadas)
+    document.getElementById('btn-export-dxf')?.addEventListener('click', () => {
+      if (!lastAnalysisData) return;
+      const topo = lastAnalysisData.geospatial.topography;
+      const safeName = (lastAnalysisData.request.parcel_name || 'parcela').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+
+      // Generar archivo DXF ASCII estándar
+      let dxf = "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1009\n0\nENDSEC\n";
+      dxf += "0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n70\n2\n";
+      dxf += "0\nLAYER\n2\nCURVAS_NIVEL\n70\n0\n62\n3\n6\nCONTINUOUS\n0\n";
+      dxf += "0\nLAYER\n2\nDERROTERO_VERTICES\n70\n0\n62\n1\n6\nCONTINUOUS\n0\n";
+      dxf += "0\nENDTAB\n0\nENDSEC\n";
+      dxf += "0\nSECTION\n2\nENTITIES\n";
+
+      // 1. Curvas de Nivel como POLYLINE 3D
+      topo.contours.forEach(c => {
+        const zVal = c.elevation_m;
+        c.polylines.forEach(poly => {
+          dxf += "0\nPOLYLINE\n8\nCURVAS_NIVEL\n66\n1\n70\n8\n";
+          poly.forEach(pt => {
+            // Convertir a coordenadas planas aproximadas en metros centradas en el lote
+            const dLatM = (pt[0] - lastAnalysisData.request.lat) * 111132;
+            const dLonM = (pt[1] - lastAnalysisData.request.lon) * 111132 * Math.cos(pt[0] * Math.PI / 180);
+            dxf += `0\nVERTEX\n8\nCURVAS_NIVEL\n10\n${dLonM.toFixed(3)}\n20\n${dLatM.toFixed(3)}\n30\n${zVal.toFixed(3)}\n`;
+          });
+          dxf += "0\nSEQEND\n";
+        });
+      });
+
+      // 2. Vértices de medición geodésica si existen
+      if (measurePoints.length > 0) {
+        dxf += "0\nPOLYLINE\n8\nDERROTERO_VERTICES\n66\n1\n70\n1\n";
+        measurePoints.forEach(p => {
+          const dLatM = (p.lat - lastAnalysisData.request.lat) * 111132;
+          const dLonM = (p.lon - lastAnalysisData.request.lon) * 111132 * Math.cos(p.lat * Math.PI / 180);
+          dxf += `0\nVERTEX\n8\nDERROTERO_VERTICES\n10\n${dLonM.toFixed(3)}\n20\n${dLatM.toFixed(3)}\n30\n${p.elevation_m.toFixed(3)}\n`;
+        });
+        dxf += "0\nSEQEND\n";
+      }
+
+      dxf += "0\nENDSEC\n0\nEOF\n";
+
+      const blob = new Blob([dxf], { type: "application/dxf" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `topografia_${safeName}.dxf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    // Botón Exportar KML para Google Earth
+    document.getElementById('btn-export-kml')?.addEventListener('click', () => {
+      if (!lastAnalysisData) return;
+      const topo = lastAnalysisData.geospatial.topography;
+      const safeName = (lastAnalysisData.request.parcel_name || 'parcela').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+
+      let kml = `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n<Document>\n`;
+      kml += `<name>${lastAnalysisData.request.parcel_name} - Estudio AgroJEV</name>\n`;
+
+      // Estilo de curvas
+      kml += `<Style id="contourStyle"><LineStyle><color>ff00ffff</color><width>2</width></LineStyle></Style>\n`;
+
+      topo.contours.forEach((c, idx) => {
+        c.polylines.forEach((poly, pIdx) => {
+          const coordsStr = poly.map(pt => `${pt[1]},${pt[0]},${c.elevation_m}`).join(' ');
+          kml += `<Placemark>\n<name>Cota ${c.elevation_m}m</name>\n<styleUrl>#contourStyle</styleUrl>\n`;
+          kml += `<LineString>\n<altitudeMode>absolute</altitudeMode>\n<coordinates>${coordsStr}</coordinates>\n</LineString>\n</Placemark>\n`;
+        });
+      });
+
+      // Punto central
+      kml += `<Placemark>\n<name>${lastAnalysisData.request.parcel_name}</name>\n`;
+      kml += `<description><![CDATA[<b>Cota:</b> ${lastAnalysisData.geospatial.elevation_m} msnm<br><b>Clase INTA:</b> ${lastAnalysisData.verdict.clase_capacidad_uso_label}<br><b>Score:</b> ${lastAnalysisData.verdict.score_aptitud_agricola}/100]]></description>\n`;
+      kml += `<Point><coordinates>${lastAnalysisData.request.lon},${lastAnalysisData.request.lat},${lastAnalysisData.geospatial.elevation_m}</coordinates></Point>\n</Placemark>\n`;
+
+      kml += `</Document>\n</kml>`;
+
+      const blob = new Blob([kml], { type: "application/vnd.google-earth.kml+xml" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `topografia_${safeName}.kml`;
       a.click();
       URL.revokeObjectURL(url);
     });

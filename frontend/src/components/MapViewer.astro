@@ -64,12 +64,32 @@
   <!-- Barra de Herramientas Topográficas del Mapa -->
   <div class="topo-toolbar">
     <div class="mode-switch-group">
-      <span class="toolbar-label">Modo Interacción:</span>
+      <span class="toolbar-label">Modo:</span>
       <button type="button" class="mode-btn active" id="mode-audit-btn" title="Hacer click en el mapa para auditar una nueva coordenada">
         📍 Auditar Lote
       </button>
       <button type="button" class="mode-btn" id="mode-transect-btn" title="Hacer click en dos puntos (A y B) dentro del mapa para trazar un corte topográfico a medida">
-        📏 Trazar Corte Topográfico (A → B)
+        📏 Corte Topográfico (A → B)
+      </button>
+      <button type="button" class="mode-btn" id="mode-measure-btn" title="Herramienta de agrimensura geodésica: medir distancias elipsoidales, rumbos, azimut y derrotero">
+        📐 Medición Geodésica
+      </button>
+    </div>
+
+    <!-- Selector de Mapa Base Geodésico / Topográfico -->
+    <div class="basemap-switch-group">
+      <span class="toolbar-label">Mapa Base:</span>
+      <button type="button" class="basemap-btn active" data-basemap="satellite" id="btn-bm-satellite" title="Esri World Imagery satelital de alta resolución">
+        🛰️ Satelital
+      </button>
+      <button type="button" class="basemap-btn" data-basemap="opentopo" id="btn-bm-opentopo" title="OpenTopoMap con curvas de nivel sombreadas y cotas">
+        🗺️ Topográfico
+      </button>
+      <button type="button" class="basemap-btn" data-basemap="shaded" id="btn-bm-shaded" title="Esri World Shaded Relief - Relieve sombreado hipsométrico">
+        ⛰️ Relieve
+      </button>
+      <button type="button" class="basemap-btn" data-basemap="osm" id="btn-bm-osm" title="OpenStreetMap cartografía vectorial vial y catastral">
+        🧭 Vial / OSM
       </button>
     </div>
 
@@ -85,6 +105,59 @@
   <div class="location-telemetry-bar" id="location-telemetry-bar">
     <span class="loc-badge">📍 OSM:</span>
     <span class="loc-text" id="stat-location-label">Ubicación geoespacial pendiente...</span>
+  </div>
+
+  <!-- Barra de Telemetría Geodésica Profesional (POSGAR 2007, DMS, Geoide, UTM) -->
+  <div class="geodesy-telemetry-bar" id="geodesy-telemetry-bar">
+    <div class="geod-col">
+      <span class="geod-lbl">POSGAR 07 (GK):</span>
+      <strong class="geod-val" id="tele-gk">X: -- m | Y: -- m (Faja --)</strong>
+    </div>
+    <div class="geod-col">
+      <span class="geod-lbl">Sexagesimal (DMS):</span>
+      <strong class="geod-val" id="tele-dms">--° --' --" S | --° --' --" W</strong>
+    </div>
+    <div class="geod-col">
+      <span class="geod-lbl">Altimetría Geodésica:</span>
+      <strong class="geod-val highlight-geo" id="tele-alt">H: -- msnm | N: -- m | h: -- m</strong>
+    </div>
+    <div class="geod-col">
+      <span class="geod-lbl">UTM / Orientación:</span>
+      <strong class="geod-val" id="tele-utm">Zona -- | Decl: --° W</strong>
+    </div>
+  </div>
+
+  <!-- Panel Flotante de Medición Geodésica / Derrotero -->
+  <div class="measure-hud-card" id="measure-hud-card" style="display: none;">
+    <div class="mhud-header">
+      <div class="mhud-title">📐 Derrotero y Medición Geodésica</div>
+      <div class="mhud-actions">
+        <button type="button" class="btn-micro" id="btn-clear-measure" title="Borrar medición actual">🗑️ Limpiar</button>
+        <button type="button" class="btn-micro" id="btn-close-measure" title="Cerrar herramienta">✕</button>
+      </div>
+    </div>
+    <div class="mhud-stats">
+      <span>Dist. Elipsoidal: <strong id="mhud-dist">0.0 m</strong></span>
+      <span>Azimut: <strong id="mhud-azim">--°</strong></span>
+      <span>Rumbo: <strong id="mhud-bearing">--</strong></span>
+      <span>Área Polígono: <strong id="mhud-area">-- ha</strong></span>
+    </div>
+    <div class="mhud-table-wrap">
+      <table class="mhud-table" id="mhud-table">
+        <thead>
+          <tr>
+            <th>Vértice</th>
+            <th>Norte (X POSGAR)</th>
+            <th>Este (Y POSGAR)</th>
+            <th>Distancia</th>
+            <th>Azimut</th>
+          </tr>
+        </thead>
+        <tbody id="mhud-tbody">
+          <tr><td colspan="5" class="mhud-empty">Haz click en el mapa para marcar vértices...</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 
   <!-- Contenedor del Mapa Leaflet -->
@@ -125,6 +198,10 @@
         <label class="toggle-item">
           <input type="checkbox" id="layer-dem" />
           <span>⛰️ Copernicus DEM Regional</span>
+        </label>
+        <label class="toggle-item">
+          <input type="checkbox" id="layer-graticule" checked />
+          <span>🌐 Cuadrícula Geodésica</span>
         </label>
       </div>
 
@@ -297,6 +374,42 @@
     align-items: center;
     gap: 6px;
     flex-wrap: wrap;
+  }
+
+  .basemap-switch-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(10, 15, 29, 0.7);
+    padding: 3px 6px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    flex-wrap: wrap;
+  }
+
+  .basemap-btn {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--text-muted);
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-family: var(--font-body);
+  }
+
+  .basemap-btn:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  .basemap-btn.active {
+    background: rgba(16, 185, 129, 0.22);
+    border-color: var(--color-agri);
+    color: var(--color-agri-light);
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.25);
   }
 
   .toolbar-label {
@@ -477,6 +590,136 @@
     border-radius: 8px;
     font-size: 0.73rem;
     color: var(--text-muted);
+  }
+
+  .geodesy-telemetry-bar {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 8px;
+    padding: 8px 12px;
+    background: rgba(13, 22, 41, 0.88);
+    border: 1px solid rgba(6, 182, 212, 0.28);
+    border-radius: 9px;
+    font-size: 0.72rem;
+  }
+
+  .geod-col {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .geod-lbl {
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: var(--color-hydro-light);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+
+  .geod-val {
+    font-family: var(--font-mono);
+    color: #ffffff;
+    font-size: 0.73rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .highlight-geo {
+    color: #34d399;
+  }
+
+  .measure-hud-card {
+    background: rgba(8, 14, 28, 0.94);
+    border: 1px solid rgba(139, 92, 246, 0.38);
+    border-radius: 10px;
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+  }
+
+  .mhud-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .mhud-title {
+    font-family: var(--font-heading);
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--color-jev-light);
+    text-transform: uppercase;
+  }
+
+  .mhud-actions {
+    display: flex;
+    gap: 6px;
+  }
+
+  .btn-micro {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: var(--text-muted);
+    padding: 2px 7px;
+    border-radius: 5px;
+    font-size: 0.68rem;
+    cursor: pointer;
+  }
+
+  .btn-micro:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.14);
+  }
+
+  .mhud-stats {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    padding-bottom: 6px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .mhud-stats strong {
+    color: #ffffff;
+    font-family: var(--font-mono);
+  }
+
+  .mhud-table-wrap {
+    max-height: 120px;
+    overflow-y: auto;
+  }
+
+  .mhud-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.68rem;
+    font-family: var(--font-mono);
+  }
+
+  .mhud-table th {
+    text-align: left;
+    color: var(--text-dim);
+    padding: 3px 6px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .mhud-table td {
+    padding: 3px 6px;
+    color: var(--text-main);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  }
+
+  .mhud-empty {
+    text-align: center;
+    color: var(--text-dim);
+    padding: 8px 0;
+    font-style: italic;
   }
 
   .loc-badge {

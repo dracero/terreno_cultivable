@@ -102,6 +102,7 @@ class TopographicAnalysisData(BaseModel):
     contours: List[ContourLine]
     flow_vectors: List[FlowVector]
     elevation_profiles: List[ElevationProfile]
+    geodesy: Dict[str, Any] = Field(default_factory=dict, description="Ficha técnica geodésica oficial (POSGAR 2007, Gauss-Krüger, Geoide, UTM)")
 
 class GeospatialState(BaseModel):
     parcel_name: str
