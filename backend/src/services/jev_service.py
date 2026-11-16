@@ -351,7 +351,7 @@ def _build_gemini_system_one_prompt(state: Dict[str, Any], questions: Dict[str, 
         "(1) Open ocean/sea, river/channel/lake bodies (`oceano_mar_abierto`, `cuerpo_agua_abierto`, `cauce_fluvial_rio`, `laguna_cuerpo_agua`), consolidated urban areas (`area_urbana`), and bare sand/rock (`suelo_desnudo_arenal_roca`) are NON-ARABLE: aptitud='no_agricola_humedal', clase_inta='clase_VII_VIII', resiliencia=0. "
         "(2) Coastal beaches/cliffs (`borde_costero_marino` with low cropland or shore distance <=180m) and permanent wetlands (`humedal_delta`) are non-arable or strictly pastoral. "
         "(3) Riparian land (`lote_ribereño_fluvial`) carries fluvial flood risk (`mecanismo_hidrico='desborde_cuenca'`). "
-        "(4) Steep mountain ridges (`relieve_serrano_escarpado` or `pendiente_porcentaje>=8.5`) are strictly non-arable (`aptitud='no_agricola_humedal'`, `clase_inta='clase_VII_VIII'`, `limitante_edafica='erosion_escorrentia_e'`, `resiliencia=0`). "
+        "(4) Steep mountain ridges (`relieve_serrano_escarpado` or `pendiente_porcentaje>=8.5`) are strictly non-arable (`aptitud='no_agricola_humedal'`, `clase_inta='clase_VII_VIII'`, `limitante_edafica='erosion_escorrentia_e'`, `resiliencia=0`). Note: high `mndwi_sentinel2` on snow/glacier (`cobertura_nieve_pct>=10`) reflects NDSI snowpack, not a lake. "
         f"State: {json.dumps(state, ensure_ascii=False)} "
         f"Schema: {json.dumps(spec, ensure_ascii=False)} "
         "Output ONLY raw JSON: "

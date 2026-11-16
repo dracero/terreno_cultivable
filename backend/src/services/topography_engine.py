@@ -199,6 +199,7 @@ def _derive_landscape_metadata(
     cropland_pct = float(hydro_env.get("cropland_pct", 0.0))
     urban_pct = float(hydro_env.get("urban_pct", 0.0))
     bare_pct = float(hydro_env.get("bare_pct", 0.0))
+    snow_pct = float(hydro_env.get("snow_pct", 0.0))
     wetland_pct = float(hydro_env.get("wetland_pct", 0.0))
     tree_pct = float(hydro_env.get("tree_pct", 0.0))
     grassland_pct = float(hydro_env.get("grassland_pct", 0.0))
@@ -248,16 +249,24 @@ def _derive_landscape_metadata(
         drainage = "Drenaje Convergente hacia Cauce Fluvial (Exposición a Crecidas)"
         base_wt = round(max(0.45, min(2.8, 0.7 + relief_amp * 0.06)), 2)
     elif env_type == "relieve_serrano_escarpado":
-        if z_mean >= 900.0:
+        if snow_pct >= 20.0:
+            region = f"Alta Montaña / Criósfera Nival y Glaciar ({z_mean:.0f} msnm · {snow_pct:.0f}% nieve/hielo)"
+            soil = "Sustrato Lítico Expuesto, Hielo Glaciar y Canchales de Alta Montaña"
+        elif z_mean >= 900.0:
             region = f"Ambiente Montañoso / Relieve Elevado ({z_mean:.0f} msnm)"
+            soil = "Suelos Líticos Someros / Roca Aflorante y Regolito Serranos"
         else:
             region = f"Ambiente Serrano / Relieve Estructural Escarpado ({mean_slope_pct:.1f}% pend.)"
-        soil = "Suelos Líticos Someros / Roca Aflorante y Regolito Serranos"
+            soil = "Suelos Líticos Someros / Roca Aflorante y Regolito Serranos"
         drainage = "Torrencial Dendrítico Encajonado / Rápida Concentración en Quebradas"
         base_wt = round(min(25.0, max(4.5, relief_amp * 0.10)), 2)
     elif env_type == "suelo_desnudo_arenal_roca":
-        region = f"Superficie Mineral Desnuda / Arenal, Salar o Roca ({bare_pct:.0f}% sin cobertura)"
-        soil = "Sustrato Mineral Sin Cobertura Vegetal (Arena / Salinidad / Lítico)"
+        if snow_pct >= 25.0:
+            region = f"Ambiente Nival / Glaciar o Plató de Alta Montaña ({snow_pct:.0f}% nieve/hielo)"
+            soil = "Cubierta Nival y Hielo Permanente sobre Sustrato Rocoso"
+        else:
+            region = f"Superficie Mineral Desnuda / Arenal, Salar o Roca ({bare_pct:.0f}% sin cobertura)"
+            soil = "Sustrato Mineral Sin Cobertura Vegetal (Arena / Salinidad / Lítico)"
         drainage = "Infiltración Rápida en Arena o Escorrentía Directa en Sustrato Duro"
         base_wt = round(max(1.5, 2.5 + mean_slope_pct * 0.7), 2)
     elif env_type == "bosque_monte":

@@ -62,6 +62,7 @@ class AgroVerdictAgent:
         wc_crop = float(lc.get("Cultivo Agrícola", lc.get("cultivos_pct", 0.0)))
         wc_grass = float(lc.get("Pastizal Natural", lc.get("pastizal_herbazal_pct", 0.0)))
         wc_bare = float(lc.get("Suelo Desnudo / Roca / Arena", lc.get("suelo_desnudo_roca_pct", 0.0)))
+        wc_snow = float(lc.get("Nieve / Hielo", lc.get("nieve_hielo_pct", 0.0)))
         wc_tree = float(lc.get("Bosque / Arbolado", lc.get("bosque_arboreo_pct", 0.0)))
 
         zones_pct = {z.zone_id: z.percentage for z in geo_state.topography.terrain_zones}
@@ -81,6 +82,7 @@ class AgroVerdictAgent:
             "cobertura_cultivo_pct": round(wc_crop, 1),
             "cobertura_pastizal_pct": round(wc_grass, 1),
             "cobertura_suelo_desnudo_pct": round(wc_bare, 1),
+            "cobertura_nieve_pct": round(wc_snow, 1),
             "cobertura_bosque_pct": round(wc_tree, 1),
             "ndvi_sentinel2": geo_state.sentinel2_ndvi,
             "mndwi_sentinel2": geo_state.sentinel2_mndwi,
@@ -262,10 +264,16 @@ class AgroVerdictAgent:
             clase_label = "Clases VII – VIII (Franja costera y protección dunaria)"
             limitante_label = "Subclase s/e · Salinidad marina, arena móvil o barranca litoral"
         elif is_rocky_serrano:
-            aptitud_label = "No Cultivable (Relieve Serrano Escarpado / Roca)"
-            clase_label = "Clases VII – VIII (Suelos líticos someros / Reserva serrana)"
-            limitante_label = "Subclase e/s · Pendiente crítica y contacto lítico rocoso"
-            resiliencia_label = "Nula aptitud arable (Pendiente escarpada y suelo somero)"
+            if wc_snow >= 20.0:
+                aptitud_label = "No Cultivable (Alta Montaña / Ambiente Nival y Glaciar)"
+                clase_label = "Clases VII – VIII (Alta Cordillera · Criósfera y Roca Escarpada)"
+                limitante_label = "Subclase e/c · Pendiente extrema, afloramiento rocoso y nieve/hielo permanente"
+                resiliencia_label = "Nula aptitud agrícola (Alta montaña nival y glaciar)"
+            else:
+                aptitud_label = "No Cultivable (Relieve Serrano Escarpado / Roca)"
+                clase_label = "Clases VII – VIII (Suelos líticos someros / Reserva serrana)"
+                limitante_label = "Subclase e/s · Pendiente crítica y contacto lítico rocoso"
+                resiliencia_label = "Nula aptitud arable (Pendiente escarpada y suelo somero)"
         elif env == "bosque_monte" and aptitud_key == "ganadero_pastizal_bajos":
             aptitud_label = "Área Boscosa / Aptitud Silvopastoril o Conservación Forestal"
             clase_label = "Clases V – VI (Cobertura arbórea densa · Ley de Bosques)"
@@ -365,26 +373,49 @@ class AgroVerdictAgent:
                 "La alta exposición salina y fragilidad costera impiden implantar cultivos extensivos convencionales.",
             ]
         elif env == "suelo_desnudo_arenal_roca":
-            dictamen = (
-                f"Terreno NO CULTIVABLE por sustrato mineral desnudo ({final_score}/100 · {geo_state.location_label}). "
-                f"ESA WorldCover registra {wc_bare:.1f}% de suelo desnudo/roca/arenal (NDVI {geo_state.sentinel2_ndvi:+.2f})."
-            )
-            cultivos = ["Inapto para agricultura (Arenal / Salar / Sustrato mineral)"]
-            recomendaciones = [
-                "Sustrato carente de cobertura vegetal y materia orgánica útil (dunas vivas, salinas o afloramiento mineral).",
-                "Evaluar eventual estabilización con vegetación halófila o psamófila autóctona antes de cualquier intervención.",
-            ]
+            if wc_snow >= 25.0:
+                dictamen = (
+                    f"Terreno NO CULTIVABLE por ambiente NIVAL / GLACIAR ({final_score}/100 · {geo_state.location_label}). "
+                    f"Cota {geo_state.elevation_m} msnm con {wc_snow:.1f}% de nieve/hielo permanente (WorldCover 70) y {wc_bare:.1f}% de roca expuesta."
+                )
+                cultivos = ["Inapto para agricultura (Nieve / Hielo permanente)", "Reserva hídrica glaciar y conservación criosférica"]
+                recomendaciones = [
+                    "Cobertura permanente de nieve/hielo y sustrato mineral frío sin horizonte edáfico arable.",
+                    "Preservar como ambiente glaciar/periglaciar regulador de escorrentía y recarga hídrica de cuenca.",
+                ]
+            else:
+                dictamen = (
+                    f"Terreno NO CULTIVABLE por sustrato mineral desnudo ({final_score}/100 · {geo_state.location_label}). "
+                    f"ESA WorldCover registra {wc_bare:.1f}% de suelo desnudo/roca/arenal (NDVI {geo_state.sentinel2_ndvi:+.2f})."
+                )
+                cultivos = ["Inapto para agricultura (Arenal / Salar / Sustrato mineral)"]
+                recomendaciones = [
+                    "Sustrato carente de cobertura vegetal y materia orgánica útil (dunas vivas, salinas o afloramiento mineral).",
+                    "Evaluar eventual estabilización con vegetación halófila o psamófila autóctona antes de cualquier intervención.",
+                ]
         elif is_rocky_serrano:
-            dictamen = (
-                f"Terreno NO CULTIVABLE por relieve serrano escarpado ({final_score}/100 · IP INTA ~{ip_inta}). "
-                f"{geo_state.location_label}: cota {geo_state.elevation_m} msnm, pendiente {geom.slope_pct}% (máx {geom.max_slope_pct}%), "
-                f"desnivel Δ {geom.relief_amplitude_m} m y Factor USLE LS={geom.ls_erosion_factor}. Inapto para laboreo agrícola ({clase_label})."
-            )
-            cultivos = ["Inapto para cultivos agrícolas", "Pastizal serrano nativo (conservación)", "Reserva natural de cuenca alta"]
-            recomendaciones = [
-                "Exclusión absoluta de roturación o labranza mecánica por pendiente crítica y alta susceptibilidad a erosión laminar y en cárcavas.",
-                "Destinar a conservación de pastizal serrano nativo, recarga hídrica y manejo pastoral de mínima carga en valles basales.",
-            ]
+            if wc_snow >= 20.0:
+                dictamen = (
+                    f"Terreno NO CULTIVABLE de ALTA MONTAÑA NIVAL / GLACIAR ({final_score}/100 · IP INTA ~{ip_inta}). "
+                    f"{geo_state.location_label}: cota {geo_state.elevation_m} msnm, {wc_snow:.1f}% nieve/hielo y {wc_bare:.1f}% roca aflorante, "
+                    f"pendiente {geom.slope_pct}% (máx {geom.max_slope_pct}%, desnivel Δ {geom.relief_amplitude_m} m). Sin espejo lacustre en el punto."
+                )
+                cultivos = ["Inapto para agricultura (Alta montaña / Nieve y hielo)", "Conservación criosférica y glaciar de cuenca alta"]
+                recomendaciones = [
+                    "Exclusión total de uso agropecuario por condiciones de alta cordillera, pendiente extrema, afloramiento rocoso y criósfera permanente.",
+                    "Área estratégica de reserva nival/glaciar y nacimiento de cuencas hídricas de montaña.",
+                ]
+            else:
+                dictamen = (
+                    f"Terreno NO CULTIVABLE por relieve serrano escarpado ({final_score}/100 · IP INTA ~{ip_inta}). "
+                    f"{geo_state.location_label}: cota {geo_state.elevation_m} msnm, pendiente {geom.slope_pct}% (máx {geom.max_slope_pct}%), "
+                    f"desnivel Δ {geom.relief_amplitude_m} m y Factor USLE LS={geom.ls_erosion_factor}. Inapto para laboreo agrícola ({clase_label})."
+                )
+                cultivos = ["Inapto para cultivos agrícolas", "Pastizal serrano nativo (conservación)", "Reserva natural de cuenca alta"]
+                recomendaciones = [
+                    "Exclusión absoluta de roturación o labranza mecánica por pendiente crítica y alta susceptibilidad a erosión laminar y en cárcavas.",
+                    "Destinar a conservación de pastizal serrano nativo, recarga hídrica y manejo pastoral de mínima carga en valles basales.",
+                ]
         elif env == "lote_ribereño_fluvial":
             dist_txt = f"{geo_state.water_distance_m:.0f} m" if geo_state.water_distance_m is not None else "<500 m"
             dictamen = (

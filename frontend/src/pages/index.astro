@@ -1331,7 +1331,15 @@ import TopoStudyPanel from '../components/TopoStudyPanel.astro';
           } else if (envKey === 'borde_costero_marino') {
             badgeSemaforo.textContent = "Frente Costero / No Cultivable";
           } else if (envKey === 'relieve_serrano_escarpado' || isErosionOrLithic) {
-            badgeSemaforo.textContent = "No Cultivable / Relieve Escarpado";
+            const snowPctVal = Number((gSat.land_cover_breakdown || {})['Nieve / Hielo'] || 0);
+            badgeSemaforo.textContent = snowPctVal >= 20
+              ? "Alta Montaña / Nieve y Roca Escarpada"
+              : "No Cultivable / Relieve Escarpado";
+          } else if (envKey === 'suelo_desnudo_arenal_roca') {
+            const snowPctVal = Number((gSat.land_cover_breakdown || {})['Nieve / Hielo'] || 0);
+            badgeSemaforo.textContent = snowPctVal >= 25
+              ? "Alta Montaña / Nieve y Glaciar Permanente"
+              : "Suelo Desnudo / Roca o Arenal";
           } else {
             badgeSemaforo.textContent = "No Cultivable / Limitación Crítica";
           }

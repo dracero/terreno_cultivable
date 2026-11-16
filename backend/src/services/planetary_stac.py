@@ -316,7 +316,15 @@ async def _fetch_sentinel2_metrics(
             },
         )
     if not feats:
-        return {"item_id": None, "date": None, "ndvi": 0.0, "ndwi": -0.25, "mndwi": -0.35}
+        return {
+            "item_id": None,
+            "date": None,
+            "ndvi": 0.0,
+            "ndwi": -0.25,
+            "mndwi": -0.35,
+            "is_bright_snow_or_cloud": False,
+            "optical_water_signal": False,
+        }
 
     feat = feats[0]
     fid = feat["id"]
@@ -331,14 +339,40 @@ async def _fetch_sentinel2_metrics(
         client, "sentinel-2-l2a", [feat], ["B03", "B04", "B08", "B11"], lon, lat
     )
     if not vals or all(v <= 0 or math.isnan(v) for v in vals):
-        return {"item_id": fid, "date": scene_date, "ndvi": 0.0, "ndwi": -0.25, "mndwi": -0.35}
+        return {
+            "item_id": fid,
+            "date": scene_date,
+            "ndvi": 0.0,
+            "ndwi": -0.25,
+            "mndwi": -0.35,
+            "is_bright_snow_or_cloud": False,
+            "optical_water_signal": False,
+        }
 
-    offset = 1000.0 if baseline_num >= 4.0 and min(vals) > 900.0 else 0.0
+    offset = 1000.0 if (baseline_num >= 4.0 and max(vals) > 1000.0 and min(vals) >= 700.0) else 0.0
     b3, b4, b8, b11 = [max(1.0, v - offset) for v in vals]
     ndvi = round(max(-1.0, min(1.0, (b8 - b4) / (b8 + b4))), 3)
     ndwi = round(max(-1.0, min(1.0, (b3 - b8) / (b3 + b8))), 3)
     mndwi = round(max(-1.0, min(1.0, (b3 - b11) / (b3 + b11))), 3)
-    return {"item_id": fid, "date": scene_date, "ndvi": ndvi, "ndwi": ndwi, "mndwi": mndwi}
+    # Nieve, glaciares y nubes comparten (B03-B11)/(B03+B11) alto (NDSI == MNDWI),
+    # pero presentan reflectancia alta en verde (B03) y NIR (B08), a diferencia del agua líquida.
+    is_bright_snow_or_cloud = bool((b3 >= 2200.0 or b8 >= 1600.0) and mndwi >= 0.15)
+    optical_water_signal = bool(
+        (not is_bright_snow_or_cloud)
+        and mndwi >= 0.28
+        and ndwi >= 0.0
+        and b3 < 2200.0
+        and b8 < 1600.0
+    )
+    return {
+        "item_id": fid,
+        "date": scene_date,
+        "ndvi": ndvi,
+        "ndwi": ndwi,
+        "mndwi": mndwi,
+        "is_bright_snow_or_cloud": is_bright_snow_or_cloud,
+        "optical_water_signal": optical_water_signal,
+    }
 
 
 async def _fetch_sentinel1_metrics(
@@ -547,6 +581,8 @@ def _analyze_hydro_and_environment(
     nominatim: Dict[str, Any],
     ndvi: float,
     mndwi: float,
+    s2_optical_water: bool = False,
+    s2_bright_snow_or_cloud: bool = False,
 ) -> Dict[str, Any]:
     """
     Analiza geomorfología hídrica, presencia de costas marinas/estuarios, ríos/arroyos,
@@ -631,15 +667,47 @@ def _analyze_hydro_and_environment(
     bare_pct = _wc_pct(60)
     snow_pct = _wc_pct(70)
 
-    # Cálculo de distancia mínima real en metros desde el centro hasta el agua
+    # Estimar cotas y pendiente promedio de la parcela antes de validar agua espectral
+    parcel_flat_dem = [v for row in parcel_dem_17 for v in row]
+    parcel_min_dem = min(parcel_flat_dem) if parcel_flat_dem else 0.0
+    parcel_max_dem = max(parcel_flat_dem) if parcel_flat_dem else 0.0
+    center_dem = parcel_dem_17[len(parcel_dem_17) // 2][len(parcel_dem_17[0]) // 2]
+
+    cell_step_m = _haversine_local_m(
+        parcel_bbox[1], parcel_bbox[0], parcel_bbox[3], parcel_bbox[0]
+    ) / max(1, len(parcel_dem_17) - 1)
+    d_n = len(parcel_dem_17)
+    slope_samples = []
+    for r in range(1, d_n - 1):
+        for c in range(1, d_n - 1):
+            gx = (parcel_dem_17[r][c + 1] - parcel_dem_17[r][c - 1]) / (2.0 * max(1.0, cell_step_m))
+            gy = (parcel_dem_17[r + 1][c] - parcel_dem_17[r - 1][c]) / (2.0 * max(1.0, cell_step_m))
+            slope_samples.append(math.hypot(gx, gy) * 100.0)
+    mean_slope_pct_est = (sum(slope_samples) / len(slope_samples)) if slope_samples else 0.0
+    relief_amp_est = parcel_max_dem - parcel_min_dem
+
+    # Cálculo de distancia mínima real en metros desde el centro hasta el agua.
+    # MNDWI coincide matemáticamente con el índice NDSI de nieve/hielo; por eso la señal
+    # óptica solo confirma agua líquida cuando se descarta nieve/glaciar, nube brillante o ladera escarpada.
     p_lats, p_lons = _grid_coords(parcel_bbox, n_p)
     c_lats, c_lons = _grid_coords(ctx_bbox, n_c)
     center_r, center_c = n_p // 2, n_p // 2
+    is_snow_or_ice_pixel = (
+        center_wc == 70
+        or snow_pct >= 8.0
+        or s2_bright_snow_or_cloud
+    )
+    spectral_liquid_water = (
+        s2_optical_water
+        and (not is_snow_or_ice_pixel)
+        and mean_slope_pct_est < 5.0
+        and (effective_water_pct >= 0.5 or wetland_pct >= 5.0 or center_jrc >= 10.0 or mean_slope_pct_est < 2.0)
+    )
     center_is_water = (
         p_water[center_r][center_c]
         or center_wc == 80
         or center_jrc >= 55.0
-        or mndwi >= 0.25
+        or spectral_liquid_water
         or (center_wc is None and sea_nodata_possible)
     )
 
@@ -673,11 +741,6 @@ def _analyze_hydro_and_environment(
     c_comps = _extract_water_components(c_water)
     p_comps = _extract_water_components(p_water)
     largest_c = c_comps[0] if c_comps else None
-
-    parcel_flat_dem = [v for row in parcel_dem_17 for v in row]
-    parcel_min_dem = min(parcel_flat_dem) if parcel_flat_dem else 0.0
-    parcel_max_dem = max(parcel_flat_dem) if parcel_flat_dem else 0.0
-    center_dem = parcel_dem_17[len(parcel_dem_17) // 2][len(parcel_dem_17[0]) // 2]
 
     nom_type = (nominatim.get("type") or "").lower()
     nom_cat = (nominatim.get("category") or "").lower()
@@ -745,20 +808,6 @@ def _analyze_hydro_and_environment(
         if not river_detected and not coast_detected and (effective_water_pct >= 18.0 or (center_is_water and wc_water_pct >= 5.0)):
             lake_detected = True
 
-    # Estimar pendiente promedio rápida del lote para decidir si es relieve montañoso/serrano
-    cell_step_m = _haversine_local_m(
-        parcel_bbox[1], parcel_bbox[0], parcel_bbox[3], parcel_bbox[0]
-    ) / max(1, len(parcel_dem_17) - 1)
-    d_n = len(parcel_dem_17)
-    slope_samples = []
-    for r in range(1, d_n - 1):
-        for c in range(1, d_n - 1):
-            gx = (parcel_dem_17[r][c + 1] - parcel_dem_17[r][c - 1]) / (2.0 * max(1.0, cell_step_m))
-            gy = (parcel_dem_17[r + 1][c] - parcel_dem_17[r - 1][c]) / (2.0 * max(1.0, cell_step_m))
-            slope_samples.append(math.hypot(gx, gy) * 100.0)
-    mean_slope_pct_est = (sum(slope_samples) / len(slope_samples)) if slope_samples else 0.0
-    relief_amp_est = parcel_max_dem - parcel_min_dem
-
     is_urban = (not center_is_water) and (center_wc == 50 or urban_pct >= 38.0)
     is_mountain_steep = (not is_open_ocean and not center_is_water) and (
         mean_slope_pct_est >= 7.5
@@ -819,11 +868,14 @@ def _analyze_hydro_and_environment(
     elif is_mountain_steep:
         water_body_type = "rio_arroyo" if river_detected else "ninguno"
         env_type = "relieve_serrano_escarpado"
-        env_label = f"Macizo Serrano / Relieve Montañoso Escarpado (Pend. {mean_slope_pct_est:.1f}%)"
+        if snow_pct >= 20.0:
+            env_label = f"Alta Montaña / Cordón Glaciar y Nival Escarpado (Nieve {snow_pct:.0f}% · Pend. {mean_slope_pct_est:.1f}%)"
+        else:
+            env_label = f"Macizo Serrano / Relieve Montañoso Escarpado (Pend. {mean_slope_pct_est:.1f}%)"
     elif bare_pct >= 45.0 or snow_pct >= 30.0:
         water_body_type = "mar_costero_estuario" if coast_detected else "ninguno"
         env_type = "suelo_desnudo_arenal_roca"
-        env_label = "Nieve / Glaciar de Alta Montaña" if snow_pct >= 30.0 else "Arenal / Médanos / Suelo Desnudo o Rocoso"
+        env_label = f"Alta Montaña Nival / Glaciar Permanente ({snow_pct:.0f}% nieve/hielo)" if snow_pct >= 30.0 else "Arenal / Médanos / Suelo Desnudo o Rocoso"
     elif tree_pct >= 55.0 and cropland_pct < 20.0:
         water_body_type = "rio_arroyo" if river_detected else "ninguno"
         env_type = "bosque_monte"
@@ -871,6 +923,8 @@ def _analyze_hydro_and_environment(
         hydro_desc = f"Cuerpo de agua continental cerrado / laguna ({dist_txt}; estacionalidad JRC {jrc_seasonality_months}/12 meses)."
     elif is_wetland:
         hydro_desc = f"Planicie de humedal / bañado ({wetland_pct:.1f}% cobertura hidrófila ESA WorldCover 10m)."
+    elif snow_pct >= 20.0:
+        hydro_desc = f"Sin espejo de agua líquido en el punto; cubierta nival/glaciar ({snow_pct:.1f}% ESA WorldCover 70) en ambiente de alta montaña."
     else:
         hydro_desc = "Sin cursos fluviales ni cuerpos de agua superficiales significativos dentro del radio inmediato."
 
@@ -1048,6 +1102,8 @@ async def query_planetary_stac(
         nominatim=nom_info,
         ndvi=float(s2_metrics.get("ndvi", 0.0)),
         mndwi=float(s2_metrics.get("mndwi", 0.0)),
+        s2_optical_water=bool(s2_metrics.get("optical_water_signal", False)),
+        s2_bright_snow_or_cloud=bool(s2_metrics.get("is_bright_snow_or_cloud", False)),
     )
 
     # Estadísticas JRC reales sobre la parcela (33x33)

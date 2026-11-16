@@ -30,6 +30,7 @@ def _describe_hydrography(geo_state: GeospatialState) -> str:
     lc = geo_state.land_cover_breakdown or {}
     wc_water = _lc_val(lc, "Cuerpo de Agua Permanente", "agua_permanente_pct")
     wc_wetland = _lc_val(lc, "Humedal / Bañado", "humedal_palustre_pct")
+    wc_snow = _lc_val(lc, "Nieve / Hielo", "nieve_hielo_pct")
     dist_txt = f"a {geo_state.water_distance_m:.0f} m" if geo_state.water_distance_m is not None else "en el entorno"
 
     if env_type == "oceano_mar_abierto":
@@ -44,6 +45,8 @@ def _describe_hydrography(geo_state: GeospatialState) -> str:
         return f"Curso fluvial / río o arroyo detectado {dist_txt} del centro ({wc_water:.1f}% agua superficial)"
     if env_type == "humedal_delta":
         return f"Humedal / Bañado activo ({wc_wetland:.1f}% palustre, {wc_water:.1f}% espejos de agua)"
+    if wc_snow >= 20.0:
+        return f"Cubierta nival / glaciar de alta montaña ({wc_snow:.1f}% WorldCover 70; sin espejo de agua líquido en el punto)"
     if wc_water >= 0.5 or geo_state.jrc_occurrence_pct >= 5.0:
         return f"Espejos o trazas hídricas menores detectadas ({wc_water:.1f}% WorldCover, JRC {geo_state.jrc_occurrence_pct:.1f}%)"
     return "Sin cursos fluviales ni frentes costeros significativos en el radio analizado"
@@ -85,6 +88,7 @@ class HydroRiskAgent:
             "cobertura_cultivo_pct": round(_lc_val(lc, "Cultivo Agrícola", "cultivos_pct"), 1),
             "cobertura_pastizal_pct": round(_lc_val(lc, "Pastizal Natural", "pastizal_herbazal_pct"), 1),
             "cobertura_suelo_desnudo_pct": round(_lc_val(lc, "Suelo Desnudo / Roca / Arena", "suelo_desnudo_roca_pct"), 1),
+            "cobertura_nieve_pct": round(_lc_val(lc, "Nieve / Hielo", "nieve_hielo_pct"), 1),
             "cobertura_bosque_pct": round(_lc_val(lc, "Bosque / Arbolado", "bosque_arboreo_pct"), 1),
             "unidad_geomorfologica": geom.region_geomorphology,
             "red_drenaje": geom.drainage_network_type,
@@ -150,6 +154,7 @@ class HydroRiskAgent:
         wc_water = _lc_val(lc, "Cuerpo de Agua Permanente", "agua_permanente_pct")
         wc_urban = _lc_val(lc, "Área Urbana / Edificada", "urbano_edificado_pct")
         wc_wetland = _lc_val(lc, "Humedal / Bañado", "humedal_palustre_pct")
+        wc_snow = _lc_val(lc, "Nieve / Hielo", "nieve_hielo_pct")
         hidrografia = _describe_hydrography(geo_state)
 
         # Consistencia biofísica por entorno real
@@ -217,13 +222,21 @@ class HydroRiskAgent:
         elif env == "relieve_serrano_escarpado" or geom.slope_pct >= 8.5:
             noul_val = min(noul_val, 0.18)
             score_val = 0
-            score_label = "Relieve Serrano Escarpado / Escorrentía Torrencial"
             choice_key = "sin_anegamiento"
-            choice_label = "Escorrentía torrencial rápida en ladera (riesgo erosivo, no inundación)"
-            resumen = (
-                f"Riesgo de anegamiento nulo ({int(noul_val * 100)}%), pero escorrentía superficial torrencial "
-                f"por fuerte pendiente ({geom.slope_pct}%, desnivel Δ {geom.relief_amplitude_m} m, Factor LS {geom.ls_erosion_factor})."
-            )
+            if wc_snow >= 20.0:
+                score_label = "Alta Montaña / Criósfera Nival y Escorrentía de Deshielo"
+                choice_label = "Escurrimiento nival/glaciar en ladera escarpada (no cuerpo lacustre)"
+                resumen = (
+                    f"Sin anegamiento lacustre ({int(noul_val * 100)}%). Relieve de alta montaña a {geo_state.elevation_m} msnm "
+                    f"con {wc_snow:.1f}% de nieve/hielo (WorldCover 70) y fuerte pendiente ({geom.slope_pct}%, desnivel Δ {geom.relief_amplitude_m} m)."
+                )
+            else:
+                score_label = "Relieve Serrano Escarpado / Escorrentía Torrencial"
+                choice_label = "Escorrentía torrencial rápida en ladera (riesgo erosivo, no inundación)"
+                resumen = (
+                    f"Riesgo de anegamiento nulo ({int(noul_val * 100)}%), pero escorrentía superficial torrencial "
+                    f"por fuerte pendiente ({geom.slope_pct}%, desnivel Δ {geom.relief_amplitude_m} m, Factor LS {geom.ls_erosion_factor})."
+                )
         elif noul_val > 0.65:
             resumen = (
                 f"Riesgo hídrico crítico ({int(noul_val * 100)}%). Sujeto a {choice_label.lower()} "
